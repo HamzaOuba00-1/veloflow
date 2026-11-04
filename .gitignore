@@ -1,0 +1,30 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Test and coverage artefacts (regenerated on every run) ---
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Virtual environment (recreated with `uv sync`) ---
+.venv/
+
+# --- Secrets and local configuration ---
+.env
+*.key
+*.pem
+
+# --- Data: never versioned with Git (collected history is large and regenerable) ---
+data/
+
+# --- Editors and OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

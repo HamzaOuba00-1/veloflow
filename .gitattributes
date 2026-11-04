@@ -1,0 +1,9 @@
+# Normalise every text file to LF in the repository and the working tree.
+# The collector runs on a Linux VM: CRLF line endings would break shell
+# scripts and config files there.
+* text=auto eol=lf
+
+# Binary files: never touch line endings, never diff.
+*.parquet binary
+*.png binary
+*.pdf binary

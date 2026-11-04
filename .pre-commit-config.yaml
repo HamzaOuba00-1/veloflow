@@ -1,0 +1,44 @@
+# Checks run automatically by Git before every commit (`pre-commit install`).
+# Run them by hand on the whole repository with: uv run pre-commit run --all-files
+repos:
+  # Generic file hygiene, independent of Python.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      # Data never belongs in Git: block any file above 500 KB.
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  # Python tools run through uv, so they use exactly the versions pinned in
+  # uv.lock: no second set of versions to keep in sync here.
+  - repo: local
+    hooks:
+      - id: uv-lock
+        name: uv.lock is up to date with pyproject.toml
+        entry: uv lock --check
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        # mypy must see the whole project to resolve imports, not single files.
+        pass_filenames: false
