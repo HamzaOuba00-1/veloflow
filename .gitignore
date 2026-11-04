@@ -20,7 +20,8 @@ coverage.xml
 *.pem
 
 # --- Data: never versioned with Git (collected history is large and regenerable) ---
-data/
+# Leading slash: only the top-level data/ folder, not docs/data/ or src/veloflow/data/.
+/data/
 
 # --- Editors and OS ---
 .vscode/
