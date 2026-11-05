@@ -59,6 +59,12 @@ class FeedSnapshot[T]:
     stations: tuple[T, ...]
     rejected: int
 
+    @property
+    def rejected_share(self) -> float:
+        """Share of station records rejected (1.0 when the feed had none)."""
+        total = len(self.stations) + self.rejected
+        return 1.0 if total == 0 else self.rejected / total
+
 
 type StatusSnapshot = FeedSnapshot[StationStatus]
 type InformationSnapshot = FeedSnapshot[StationInfo]

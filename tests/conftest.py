@@ -1,4 +1,4 @@
-"""Shared helpers for collector tests: recorded responses and their variants."""
+"""Shared fixtures: recorded Vélib' responses and their variants."""
 
 import json
 from collections.abc import Callable
@@ -10,7 +10,7 @@ import pytest
 
 from veloflow.collector.gbfs import RawResponse
 
-FIXTURES = Path(__file__).parent.parent / "fixtures" / "gbfs"
+FIXTURES = Path(__file__).parent / "fixtures" / "gbfs"
 FETCHED_AT = datetime(2026, 11, 5, 8, 0, 0, tzinfo=UTC)
 
 

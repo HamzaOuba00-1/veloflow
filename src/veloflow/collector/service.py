@@ -180,9 +180,9 @@ class Collector:
             self._record_failure(feed, state, error)
             return False
 
-        total = len(snapshot.stations) + snapshot.rejected
-        if total == 0 or snapshot.rejected / total > MAX_REJECTED_SHARE:
+        if snapshot.rejected_share > MAX_REJECTED_SHARE:
             self._archive.append(feed, response, fingerprint=None, status=STATUS_DEGRADED)
+            total = len(snapshot.stations) + snapshot.rejected
             degraded = FeedFormatError(f"degraded version: {snapshot.rejected}/{total} rejected")
             self._record_failure(feed, state, degraded)
             return False

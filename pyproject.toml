@@ -11,6 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "httpx>=0.28.1",
+    "polars>=2.1.0",
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
 ]
@@ -18,6 +19,7 @@ dependencies = [
 [project.scripts]
 # Installed as a command in the virtual environment: `uv run veloflow-collector`.
 veloflow-collector = "veloflow.collector.__main__:main"
+veloflow-compact = "veloflow.storage.compaction:main"
 
 [build-system]
 requires = ["hatchling"]
