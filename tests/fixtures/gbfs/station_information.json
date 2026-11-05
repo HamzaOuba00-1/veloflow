@@ -1,0 +1,104 @@
+{
+  "lastUpdatedOther": 1793807328,
+  "ttl": 3600,
+  "data": {
+    "stations": [
+      {
+        "station_id": 213688169,
+        "stationCode": "16107",
+        "name": "Benjamin Godard - Victor Hugo",
+        "lat": 48.865983,
+        "lon": 2.275725,
+        "capacity": 35,
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 1062807847,
+        "stationCode": "13123",
+        "name": "BNF - Bibliothèque Nationale de France",
+        "lat": 48.8350268238,
+        "lon": 2.3760157451034,
+        "capacity": 42,
+        "rental_methods": [
+          "CREDITCARD"
+        ],
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 1057319366,
+        "stationCode": "13128",
+        "name": "Quai de la Gare - Pont de Bercy",
+        "lat": 48.83730787972,
+        "lon": 2.3740861260598,
+        "capacity": 30,
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 1015246367,
+        "stationCode": "8116",
+        "name": "Champs-Elysees - Bassano",
+        "lat": 48.871811807816,
+        "lon": 2.300238981843,
+        "capacity": 25,
+        "rental_methods": [
+          "CREDITCARD"
+        ],
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 82571110,
+        "stationCode": "21502",
+        "name": "Verdun - Place Henri IV",
+        "lat": 48.870797375639,
+        "lon": 2.2277003154159,
+        "capacity": 1,
+        "rental_methods": [
+          "CREDITCARD"
+        ],
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 21797305137,
+        "stationCode": "60001",
+        "name": "Invalides - Quai d'Orsay",
+        "lat": 48.862523251733,
+        "lon": 2.3101759159595,
+        "capacity": 410,
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 88140066,
+        "stationCode": "8017",
+        "name": "Rocher - Laborde",
+        "lat": 48.875902407127,
+        "lon": 2.3226163163781,
+        "capacity": 0,
+        "rental_methods": [
+          "CREDITCARD"
+        ],
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 72765603,
+        "stationCode": "5022",
+        "name": "Boulangers - Cardinal Lemoine",
+        "lat": 48.8462904,
+        "lon": 2.3521495,
+        "capacity": 20,
+        "rental_methods": [
+          "CREDITCARD"
+        ],
+        "station_opening_hours": null
+      },
+      {
+        "station_id": 516709288,
+        "stationCode": "11104",
+        "name": "Charonne - Robert et Sonia Delaunay",
+        "lat": 48.855907555969,
+        "lon": 2.3925706744194,
+        "capacity": 20,
+        "station_opening_hours": null
+      }
+    ]
+  }
+}
