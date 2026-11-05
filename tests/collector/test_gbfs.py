@@ -90,6 +90,19 @@ def test_status_rejects_only_the_invalid_station(field: str, value: Any) -> None
     assert "16107" not in {s.station_code for s in snapshot.stations}
 
 
+def test_status_rejection_logs_are_capped(caplog: pytest.LogCaptureFixture) -> None:
+    """1,520 rejected stations must not mean 1,520 log lines."""
+    feed = fixture_json("station_status.json")
+    for station in feed["data"]["stations"]:
+        station["stationCode"] = None
+
+    snapshot = parse_station_status(json.dumps(feed).encode(), FETCHED_AT)
+
+    assert snapshot.rejected == 9
+    assert caplog.text.count("rejected station") == 3
+    assert "6 more stations rejected" in caplog.text
+
+
 def test_status_accepts_standard_last_updated_key() -> None:
     feed = fixture_json("station_status.json")
     feed["last_updated"] = feed.pop("lastUpdatedOther")

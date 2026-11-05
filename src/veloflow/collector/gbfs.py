@@ -37,6 +37,9 @@ from veloflow.collector.models import (
 
 logger = logging.getLogger(__name__)
 
+# Detailed log lines per snapshot; the rest is summarised in one line.
+MAX_LOGGED_REJECTIONS = 3
+
 
 # --------------------------------------------------------------------------
 # Errors
@@ -181,13 +184,16 @@ def _parse_stations[R: (_RawStationStatus, _RawStationInfo)](
             valid.append(schema.model_validate(record))
         except ValidationError as error:
             rejected += 1
-            code = record.get("stationCode") if isinstance(record, dict) else None
-            logger.warning(
-                "%s: rejected station %s: %s",
-                feed,
-                code,
-                error.errors(include_url=False)[0]["msg"],
-            )
+            if rejected <= MAX_LOGGED_REJECTIONS:
+                code = record.get("stationCode") if isinstance(record, dict) else None
+                logger.warning(
+                    "%s: rejected station %s: %s",
+                    feed,
+                    code,
+                    error.errors(include_url=False)[0]["msg"],
+                )
+    if rejected > MAX_LOGGED_REJECTIONS:
+        logger.warning("%s: %d more stations rejected", feed, rejected - MAX_LOGGED_REJECTIONS)
     return valid, rejected
 
 

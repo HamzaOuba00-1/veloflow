@@ -12,7 +12,12 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.14.2",
+    "pydantic-settings>=2.16.2",
 ]
+
+[project.scripts]
+# Installed as a command in the virtual environment: `uv run veloflow-collector`.
+veloflow-collector = "veloflow.collector.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

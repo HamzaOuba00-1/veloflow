@@ -104,6 +104,25 @@ Full gzip snapshots would exceed the 1 GB/month free transfer from the
 collector VM. They can be kept on the VM disk (about 5 GB over the project) but
 the data shipped to the laptop has to be more compact.
 
+## Update, 5 November 2026: what differs between the servers
+
+A first 4-minute run of the collector (09:16–09:21 UTC) archived a new version
+almost every 30 s instead of every minute. Sorting the archived versions by
+feed time showed pairs published **2 s apart with identical stock** but
+`last_reported` values differing for **126 stations**, by up to ten minutes.
+The feed alternates between two servers that agree on bikes and docks but not
+on `last_reported`.
+
+The collector fingerprint now ignores `last_reported`, as the exploration
+script already did. Real stock changes arrive every 59–61 s, with 123 to 149
+stations changing per minute around 10:00 on a Thursday.
+
+A second run (09:41–09:57 UTC, 17 versions) caught one **degraded version**
+(feed time 09:45:05): all 1,520 stations present with plausible totals, but
+every `stationCode` null and `num_bikes_available_types` empty (`[{}, {}]`).
+The collector now archives such versions with status `degraded` (more than
+10 % of station records rejected) and does not treat them as data.
+
 ## Consequences for the collector
 
 1. Poll every 30 s and deduplicate on content, not on timestamp.
