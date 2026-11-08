@@ -35,6 +35,13 @@ repos:
         entry: uv run ruff check --fix --exit-non-zero-on-fix
         language: system
         types: [python]
+      - id: no-healthcheck-urls
+        name: no real healthchecks.io ping URL
+        # Ping URLs are secrets (they live in /etc/veloflow/veloflow.env on the
+        # VM). The all-zero UUID of the template is allowed, a real one is not.
+        entry: 'hc-ping\.com/(?!00000000-0000-0000-0000-000000000000)[0-9a-f]{8}-'
+        language: pygrep
+        exclude: ^\.pre-commit-config\.yaml$
       - id: mypy
         name: mypy (strict)
         entry: uv run mypy

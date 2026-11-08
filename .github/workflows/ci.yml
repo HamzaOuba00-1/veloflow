@@ -1,0 +1,49 @@
+# Continuous integration: every push to main and every pull request runs the
+# same checks as the local pre-commit hooks, plus the test suite, on a clean
+# Linux machine (the collector runs on Linux in production).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow only reads the repository.
+permissions:
+  contents: read
+
+# A newer push on the same branch cancels the run that became useless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Third-party actions are pinned to a full commit SHA: a tag can be moved
+      # to malicious code, a commit cannot. The comment keeps the version readable.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7" # same uv as on the laptop and the VM
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python and dependencies, exactly as locked
+        run: uv sync --frozen
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Lint, format, types, secrets (pre-commit hooks)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Tests and coverage
+        run: uv run pytest --cov --cov-report=term-missing
