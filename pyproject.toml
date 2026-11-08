@@ -10,16 +10,19 @@ license-files = ["LICENSE"]
 # development, the collector VM and Docker images all run the same interpreter.
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "holidays>=0.108",
     "httpx>=0.28.1",
     "polars>=2.1.0",
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
+    "tzdata>=2026.6",
 ]
 
 [project.scripts]
 # Installed as a command in the virtual environment: `uv run veloflow-collector`.
 veloflow-collector = "veloflow.collector.__main__:main"
 veloflow-compact = "veloflow.storage.compaction:main"
+veloflow-refresh-school-holidays = "veloflow.context.school_holidays:main"
 
 [build-system]
 requires = ["hatchling"]
