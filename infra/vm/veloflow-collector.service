@@ -12,6 +12,8 @@ User=veloflow
 Group=veloflow
 WorkingDirectory=/opt/veloflow/app
 Environment=VELOFLOW_COLLECTOR_DATA_DIR=/var/lib/veloflow
+# Secrets (healthcheck URL), root-readable only, never in Git. "-": optional.
+EnvironmentFile=-/etc/veloflow/veloflow.env
 # Log lines reach the journal immediately instead of sitting in a buffer.
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/veloflow/app/.venv/bin/veloflow-collector

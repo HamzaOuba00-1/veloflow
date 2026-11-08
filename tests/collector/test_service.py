@@ -42,14 +42,32 @@ class ScriptedSource:
         self.rediscoveries += 1
 
 
+class FakeHeartbeat:
+    """Records what the collector reports to the monitor."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def ping(self) -> None:
+        self.events.append("ping")
+
+    def fail(self, message: str) -> None:
+        self.events.append(f"fail: {message}")
+
+
 def make_collector(
-    source: ScriptedSource, data_dir: Path, *, poll_interval_s: float = 30.0
+    source: ScriptedSource,
+    data_dir: Path,
+    *,
+    poll_interval_s: float = 30.0,
+    heartbeat: FakeHeartbeat | None = None,
 ) -> Collector:
     return Collector(
         source,
         RawArchive(data_dir),
         poll_interval_s=poll_interval_s,
         information_interval_s=3600.0,
+        heartbeat=heartbeat,
     )
 
 
@@ -237,6 +255,50 @@ def test_information_feed_is_archived_separately(
 
     assert make_collector(source, tmp_path).poll_information() is True
     assert len(archived(tmp_path, "station_information")) == 1
+
+
+# --------------------------------------------------------------------------
+# Heartbeat
+# --------------------------------------------------------------------------
+
+
+def test_healthy_polls_ping_even_without_a_new_version(
+    tmp_path: Path, make_response: ResponseFactory
+) -> None:
+    """At night a minute can pass without change: that is not an outage."""
+    heartbeat = FakeHeartbeat()
+    same = make_response()
+    collector = make_collector(
+        ScriptedSource({"station_status": [same, same]}), tmp_path, heartbeat=heartbeat
+    )
+
+    assert [collector.poll_status(), collector.poll_status()] == [True, False]
+    assert heartbeat.events == ["ping", "ping"]
+
+
+def test_failure_streak_alerts_once_then_recovery_pings(
+    tmp_path: Path, make_response: ResponseFactory
+) -> None:
+    heartbeat = FakeHeartbeat()
+    streak: list[Step] = [FeedUnavailableError("503")] * (service.ALERT_AFTER_FAILURES + 2)
+    source = ScriptedSource({"station_status": [*streak, make_response()]})
+    collector = make_collector(source, tmp_path, heartbeat=heartbeat)
+
+    for _ in range(len(streak) + 1):
+        collector.poll_status()
+
+    assert len(heartbeat.events) == 2
+    assert heartbeat.events[0].startswith("fail: station_status: 10 failures in a row")
+    assert heartbeat.events[1] == "ping"
+
+
+def test_degraded_version_does_not_ping(tmp_path: Path, make_response: ResponseFactory) -> None:
+    heartbeat = FakeHeartbeat()
+    source = ScriptedSource({"station_status": [make_response(edit=null_codes_and_empty_types)]})
+
+    make_collector(source, tmp_path, heartbeat=heartbeat).poll_status()
+
+    assert heartbeat.events == []
 
 
 # --------------------------------------------------------------------------

@@ -21,6 +21,7 @@ def test_defaults_match_the_design(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     assert settings.poll_interval_s == 30.0
     assert settings.gbfs_url.endswith("/gbfs.json")
+    assert settings.healthcheck_url is None
 
 
 def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -66,12 +67,32 @@ def test_main_wires_everything_and_exits_cleanly(
     )
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: logging_config.update(kwargs))
     monkeypatch.setattr(logging.Formatter, "converter", time.localtime)
+    httpx_logger = logging.getLogger("httpx")
+    monkeypatch.setattr(httpx_logger, "level", httpx_logger.level)
 
     assert entry.main() == 0
     assert ran == [True]
+    assert httpx_logger.level == logging.WARNING  # request URLs stay out of the logs
     assert set(handlers) == {signal.SIGINT, signal.SIGTERM}
     assert logging_config["level"] == "INFO"
     assert logging.Formatter.converter is time.gmtime
+
+
+def test_main_creates_the_heartbeat_when_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VELOFLOW_COLLECTOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("VELOFLOW_COLLECTOR_HEALTHCHECK_URL", "https://hc-ping.com/x")
+    wired: list[object] = []
+    monkeypatch.setattr(signal, "signal", lambda signum, handler: None)
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: None)
+    monkeypatch.setattr(logging.Formatter, "converter", time.localtime)
+    monkeypatch.setattr(Collector, "run", lambda self: wired.append(self._heartbeat))
+
+    assert entry.main() == 0
+    assert type(wired[0]).__name__ == "Heartbeat"
+    assert "outages will go unnoticed" not in caplog.text
 
 
 def test_stop_signal_stops_the_collector(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

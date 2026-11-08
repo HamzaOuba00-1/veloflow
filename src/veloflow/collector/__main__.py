@@ -8,6 +8,7 @@ from types import FrameType
 
 from veloflow.collector.config import CollectorSettings
 from veloflow.collector.gbfs import GbfsClient
+from veloflow.collector.heartbeat import Heartbeat
 from veloflow.collector.service import Collector
 from veloflow.collector.storage import RawArchive
 
@@ -23,6 +24,9 @@ def configure_logging(level: str) -> None:
         force=True,
     )
     logging.Formatter.converter = time.gmtime
+    # httpx logs every request URL at INFO: 2,880 lines a day of noise, and the
+    # heartbeat URL is a secret. Our own logs already report each version.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main() -> int:
@@ -30,6 +34,9 @@ def main() -> int:
     settings = CollectorSettings()
     configure_logging(settings.log_level)
     archive = RawArchive(settings.data_dir)
+    heartbeat = Heartbeat(settings.healthcheck_url) if settings.healthcheck_url else None
+    if heartbeat is None:
+        logger.warning("no healthcheck URL configured: outages will go unnoticed")
 
     with GbfsClient(
         settings.gbfs_url, user_agent=settings.user_agent, timeout_s=settings.timeout_s
@@ -39,6 +46,7 @@ def main() -> int:
             archive,
             poll_interval_s=settings.poll_interval_s,
             information_interval_s=settings.information_interval_s,
+            heartbeat=heartbeat,
         )
 
         def request_stop(signum: int, _frame: FrameType | None) -> None:
@@ -55,6 +63,8 @@ def main() -> int:
         )
         collector.run()
 
+    if heartbeat is not None:
+        heartbeat.close()
     logger.info("collector stopped")
     return 0
 

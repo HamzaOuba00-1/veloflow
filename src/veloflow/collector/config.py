@@ -32,6 +32,9 @@ class CollectorSettings(BaseSettings):
     timeout_s: float = Field(default=15.0, gt=0.0)
     data_dir: Path = Path("data")
     log_level: str = "INFO"
+    # Ping URL of the external monitor (dead man's switch). A secret: set it in
+    # the environment of the VM, never in the repository. None disables it.
+    healthcheck_url: str | None = None
 
     @model_validator(mode="after")
     def _timeout_fits_in_interval(self) -> Self:

@@ -44,6 +44,12 @@ if ! command -v uv >/dev/null 2>&1; then
         | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 fi
 
+log "Secrets folder (filled by hand, see infra/vm/veloflow.env.example)"
+install -d -o root -g root -m 700 /etc/veloflow
+if [[ ! -f /etc/veloflow/veloflow.env ]]; then
+    echo "    /etc/veloflow/veloflow.env is missing: monitoring stays disabled."
+fi
+
 log "Dedicated system user '${APP_USER}' (no login shell, no sudo)"
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
     useradd --system --home-dir "${APP_HOME}" --create-home \

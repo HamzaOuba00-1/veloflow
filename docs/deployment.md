@@ -66,6 +66,20 @@ gcloud compute ssh veloflow-collector --command="systemctl list-timers veloflow-
 gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
 ```
 
+## Monitoring
+
+Two checks on [healthchecks.io](https://healthchecks.io) (free plan) watch the
+VM from the outside and email an alert when something stops:
+
+| Check | Pinged by | Schedule | Alert when |
+|---|---|---|---|
+| `veloflow-collector` | the collector, after a healthy poll (at most once a minute) | period 1 min, grace 10 min | no ping for 10 min, or 10 failed polls in a row (`/fail`) |
+| `veloflow-compact` | systemd, after the nightly job, with its exit status | cron `20 0 * * *` UTC, grace 1 h | missing run or non-zero exit status |
+
+The ping URLs are secrets. They live in `/etc/veloflow/veloflow.env` on the VM
+(owner root, mode 600), read by systemd before it drops privileges, and are
+never logged. Template: `infra/vm/veloflow.env.example`.
+
 ## Cost checks
 
 - Budget alert `account-guard`: 1 USD per month on the billing account.

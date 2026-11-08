@@ -8,6 +8,11 @@ User=veloflow
 Group=veloflow
 WorkingDirectory=/opt/veloflow/app
 ExecStart=/opt/veloflow/app/.venv/bin/veloflow-compact --data-dir /var/lib/veloflow
+EnvironmentFile=-/etc/veloflow/veloflow.env
+# Report the exit status to the external monitor: /0 means success, anything
+# else raises an alert. "$$" is a literal "$" for systemd, expanded by sh.
+# The leading "-" keeps a monitoring hiccup from marking the job as failed.
+ExecStopPost=-/bin/sh -c '[ -n "$${VELOFLOW_COMPACT_PING_URL:-}" ] && curl -fsS -m 10 --retry 3 -o /dev/null "$${VELOFLOW_COMPACT_PING_URL}/$${EXIT_STATUS}"'
 # Low priority: the collector must keep its 30 s rhythm during compaction.
 Nice=10
 IOSchedulingClass=idle

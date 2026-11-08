@@ -44,6 +44,18 @@ RECENT_VERSIONS = 8
 MAX_REJECTED_SHARE = 0.10
 
 
+class HeartbeatSink(Protocol):
+    """What the collector needs from the external monitor (``Heartbeat`` in production)."""
+
+    def ping(self) -> None:
+        """Report a healthy poll."""
+        ...
+
+    def fail(self, message: str) -> None:
+        """Report a failure that needs a human."""
+        ...
+
+
 class FeedSource(Protocol):
     """What the collector needs from a feed client (``GbfsClient`` in production)."""
 
@@ -116,10 +128,12 @@ class Collector:
         *,
         poll_interval_s: float,
         information_interval_s: float,
+        heartbeat: HeartbeatSink | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         """Wire the collector; nothing runs until :meth:`run`."""
         self._source = source
+        self._heartbeat = heartbeat
         self._archive = archive
         self._poll_interval_s = poll_interval_s
         self._information_interval_s = information_interval_s
@@ -146,7 +160,12 @@ class Collector:
 
     def poll_status(self) -> bool:
         """Poll ``station_status`` once; return True if a new version was archived."""
-        return self._poll(STATUS_FEED, parse_station_status)
+        archived = self._poll(STATUS_FEED, parse_station_status)
+        # Healthy means "the feed was read and parsed", new version or not: at
+        # night a minute can pass without any change, which is not an outage.
+        if self._heartbeat is not None and self._states[STATUS_FEED].consecutive_failures == 0:
+            self._heartbeat.ping()
+        return archived
 
     def poll_information(self) -> bool:
         """Poll ``station_information`` once; return True if a new version was archived."""
@@ -211,5 +230,8 @@ class Collector:
         failures = state.consecutive_failures
         level = logging.ERROR if failures >= ALERT_AFTER_FAILURES else logging.WARNING
         logger.log(level, "%s: failure %d in a row: %s", feed, failures, error)
+        # Alert once per failure streak, when it becomes serious.
+        if self._heartbeat is not None and feed == STATUS_FEED and failures == ALERT_AFTER_FAILURES:
+            self._heartbeat.fail(f"{feed}: {failures} failures in a row, last: {error}")
         if failures % REDISCOVER_EVERY == 0:
             self._source.forget_feed_urls()
