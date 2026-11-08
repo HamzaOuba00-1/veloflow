@@ -1,0 +1,21 @@
+[Unit]
+Description=VeloFlow: compact yesterday's raw station_status into Parquet
+Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/data/storage.md
+
+[Service]
+Type=oneshot
+User=veloflow
+Group=veloflow
+WorkingDirectory=/opt/veloflow/app
+ExecStart=/opt/veloflow/app/.venv/bin/veloflow-compact --data-dir /var/lib/veloflow
+# Low priority: the collector must keep its 30 s rhythm during compaction.
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/veloflow
+# Measured peak for a full day: 212 MB.
+MemoryMax=450M

@@ -1,0 +1,78 @@
+# Deployment: the collector VM
+
+The collector runs 24/7 on a Google Cloud **e2-micro** VM, inside the free
+tier. Development, training and serving stay on the laptop. Everything the VM
+runs is described by files in this repository.
+
+| File | Role |
+|---|---|
+| `infra/gcp/create_collector_vm.ps1` | Creates the VM (run from the laptop, PowerShell) |
+| `infra/vm/setup.sh` | Installs or updates the collector on the VM (idempotent) |
+| `infra/vm/veloflow-collector.service` | systemd service: the collection loop |
+| `infra/vm/veloflow-compact.service` | systemd one-shot job: raw → Parquet for yesterday |
+| `infra/vm/veloflow-compact.timer` | Runs the job every night at 00:20 UTC |
+
+## VM settings and why
+
+| Setting | Value | Reason |
+|---|---|---|
+| Machine | `e2-micro`, `us-east1-b` | Only free machine type; free regions are us-west1, us-central1, us-east1 |
+| Boot disk | `pd-standard`, 30 GB | The default `pd-balanced` is billed; 30 GB is the free allowance |
+| Network | Standard tier, ephemeral IP | Needed to reach the feed; no charge for the IP on the free tier |
+| Identity | No service account | The collector calls no Google API |
+| Protection | Deletion protection | The disk holds the only copy of the raw archive |
+| Swap | 1 GB file, `vm.swappiness=10` | 1 GB of RAM, ~600 MB available after the OS |
+
+## Layout on the VM
+
+| Path | Content |
+|---|---|
+| `/opt/veloflow/app` | Git checkout of `main` and its `.venv` (runtime dependencies only) |
+| `/opt/veloflow/python` | Python 3.12 installed by uv |
+| `/var/lib/veloflow/raw` | Raw archive (bronze), written by the collector |
+| `/var/lib/veloflow/silver` | Parquet files (silver), written by the nightly job |
+
+Both services run as the `veloflow` system user (no shell, no sudo), can write
+only to `/var/lib/veloflow`, and have a memory cap (300 MB for the collector,
+450 MB for the compaction).
+
+## First deployment and updates
+
+From the laptop, once the changes are pushed to `main`:
+
+```powershell
+gcloud compute scp infra/vm/setup.sh veloflow-collector:~/setup.sh
+gcloud compute ssh veloflow-collector --command="sudo bash ~/setup.sh"
+```
+
+The same two commands deploy a new version: the script pulls `main`
+(fast-forward only), resynchronises dependencies from `uv.lock` and restarts
+the collector.
+
+## Day-to-day checks
+
+```powershell
+# Service state and the last log lines
+gcloud compute ssh veloflow-collector --command="systemctl status veloflow-collector --no-pager"
+gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-collector -n 30 --no-pager"
+
+# Next and last compaction runs
+gcloud compute ssh veloflow-collector --command="systemctl list-timers veloflow-compact.timer --no-pager"
+
+# Data on disk, memory, disk space
+gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
+```
+
+## Cost checks
+
+- Budget alert `account-guard`: 1 USD per month on the billing account.
+- 48 hours after any change to the VM: *Billing → Reports*, grouped by SKU. Every
+  Compute Engine line must be offset by a free-tier credit.
+
+## Known limits
+
+- Port 22 is open to the internet on the default network (key-based SSH only).
+  Planned hardening: SSH through IAP and Secure Boot.
+- The external IP may change after a VM restart; `gcloud compute ssh` finds the
+  VM by name, so nothing depends on it.
+- Live forecasts only run while the laptop is on; collection never stops.

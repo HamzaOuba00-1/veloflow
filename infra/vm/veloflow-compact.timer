@@ -1,0 +1,12 @@
+[Unit]
+Description=Run VeloFlow compaction every night
+
+[Timer]
+# 00:20 UTC: yesterday's raw file (partitioned by UTC day) is complete.
+OnCalendar=*-*-* 00:20:00 UTC
+# If the VM was off at 00:20, run at the next boot instead of skipping the day.
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
