@@ -33,6 +33,8 @@ echo 'vm.swappiness=10' > /etc/sysctl.d/99-veloflow.conf
 sysctl --quiet -p /etc/sysctl.d/99-veloflow.conf
 
 log "System packages"
+# No terminal over `gcloud compute ssh --command`: tell apt not to ask anything.
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq git curl ca-certificates >/dev/null
 

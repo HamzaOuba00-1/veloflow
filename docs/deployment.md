@@ -41,9 +41,12 @@ only to `/var/lib/veloflow`, and have a memory cap (300 MB for the collector,
 From the laptop, once the changes are pushed to `main`:
 
 ```powershell
-gcloud compute scp infra/vm/setup.sh veloflow-collector:~/setup.sh
-gcloud compute ssh veloflow-collector --command="sudo bash ~/setup.sh"
+gcloud compute scp infra/vm/setup.sh veloflow-collector:setup.sh
+gcloud compute ssh veloflow-collector --command="sudo bash setup.sh"
 ```
+
+On Windows, `gcloud compute scp` uses PuTTY's `pscp`, which does not expand
+`~`: use a relative destination, which lands in the remote home directory.
 
 The same two commands deploy a new version: the script pulls `main`
 (fast-forward only), resynchronises dependencies from `uv.lock` and restarts
