@@ -1,0 +1,30 @@
+[Unit]
+Description=VeloFlow: archive the current weather forecast (Open-Meteo)
+Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/data/weather.md
+# The forecast comes from the internet: wait for the network after a boot.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=veloflow
+Group=veloflow
+WorkingDirectory=/opt/veloflow/app
+ExecStart=/opt/veloflow/app/.venv/bin/veloflow-weather-snapshot --data-dir /var/lib/veloflow
+EnvironmentFile=-/etc/veloflow/veloflow.env
+# Ping the external monitor on success only. A single failed hour is not worth
+# an email (each snapshot covers the next 24 hours); the monitor alerts when
+# no snapshot succeeded for two hours (period 1 h + grace 1 h).
+# "$$" is a literal "$" for systemd, expanded by sh.
+ExecStopPost=-/bin/sh -c '[ "$${EXIT_STATUS}" = 0 ] && [ -n "$${VELOFLOW_WEATHER_PING_URL:-}" ] && curl -fsS -m 10 --retry 3 -o /dev/null "$${VELOFLOW_WEATHER_PING_URL}"'
+# Low priority: the collector must keep its 30 s rhythm.
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/veloflow
+# Measured peak with a real response: 69 MB.
+MemoryMax=150M

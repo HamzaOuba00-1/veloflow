@@ -1,0 +1,12 @@
+[Unit]
+Description=Archive the weather forecast every hour
+
+[Timer]
+# Minute 7, not 0: most scheduled clients hit public APIs on the hour.
+OnCalendar=*-*-* *:07:00 UTC
+# After a reboot, take the missed snapshot at once instead of waiting an hour.
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

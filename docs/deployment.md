@@ -11,6 +11,8 @@ runs is described by files in this repository.
 | `infra/vm/veloflow-collector.service` | systemd service: the collection loop |
 | `infra/vm/veloflow-compact.service` | systemd one-shot job: raw → Parquet for yesterday |
 | `infra/vm/veloflow-compact.timer` | Runs the job every night at 00:20 UTC |
+| `infra/vm/veloflow-weather.service` | systemd one-shot job: archive the current weather forecast |
+| `infra/vm/veloflow-weather.timer` | Runs it every hour at minute 7 (UTC) |
 
 ## VM settings and why
 
@@ -29,12 +31,12 @@ runs is described by files in this repository.
 |---|---|
 | `/opt/veloflow/app` | Git checkout of `main` and its `.venv` (runtime dependencies only) |
 | `/opt/veloflow/python` | Python 3.12 installed by uv |
-| `/var/lib/veloflow/raw` | Raw archive (bronze), written by the collector |
+| `/var/lib/veloflow/raw` | Raw archive (bronze): GBFS responses from the collector, weather forecasts from the hourly job |
 | `/var/lib/veloflow/silver` | Parquet files (silver), written by the nightly job |
 
-Both services run as the `veloflow` system user (no shell, no sudo), can write
+All services run as the `veloflow` system user (no shell, no sudo), can write
 only to `/var/lib/veloflow`, and have a memory cap (300 MB for the collector,
-450 MB for the compaction).
+450 MB for the compaction, 150 MB for the weather snapshot).
 
 ## First deployment and updates
 
@@ -59,8 +61,9 @@ the collector.
 gcloud compute ssh veloflow-collector --command="systemctl status veloflow-collector --no-pager"
 gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-collector -n 30 --no-pager"
 
-# Next and last compaction runs
-gcloud compute ssh veloflow-collector --command="systemctl list-timers veloflow-compact.timer --no-pager"
+# Next and last runs of the scheduled jobs
+gcloud compute ssh veloflow-collector --command="systemctl list-timers 'veloflow-*' --no-pager"
+gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-weather -n 5 --no-pager"
 
 # Data on disk, memory, disk space
 gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
@@ -68,13 +71,17 @@ gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; fre
 
 ## Monitoring
 
-Two checks on [healthchecks.io](https://healthchecks.io) (free plan) watch the
+Three checks on [healthchecks.io](https://healthchecks.io) (free plan) watch the
 VM from the outside and email an alert when something stops:
 
 | Check | Pinged by | Schedule | Alert when |
 |---|---|---|---|
 | `veloflow-collector` | the collector, after a healthy poll (at most once a minute) | period 1 min, grace 10 min | no ping for 10 min, or 10 failed polls in a row (`/fail`) |
 | `veloflow-compact` | systemd, after the nightly job, with its exit status | cron `20 0 * * *` UTC, grace 1 h | missing run or non-zero exit status |
+| `veloflow-weather` | systemd, after each successful hourly snapshot | period 1 h, grace 1 h | no successful snapshot for 2 hours |
+
+A single failed weather snapshot raises no alert on purpose: each snapshot
+covers the next 24 hours, so one missing hour loses nothing the model needs.
 
 The ping URLs are secrets. They live in `/etc/veloflow/veloflow.env` on the VM
 (owner root, mode 600), read by systemd before it drops privileges, and are
