@@ -23,6 +23,7 @@ dependencies = [
 veloflow-collector = "veloflow.collector.__main__:main"
 veloflow-compact = "veloflow.storage.compaction:main"
 veloflow-refresh-school-holidays = "veloflow.context.school_holidays:main"
+veloflow-weather-snapshot = "veloflow.weather.snapshot:main"
 
 [build-system]
 requires = ["hatchling"]

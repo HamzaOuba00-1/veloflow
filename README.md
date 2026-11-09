@@ -30,6 +30,13 @@ uv run pre-commit run --all-files     # format, lint and type-check everything
 
 ## License
 
-The code is released under the [MIT License](LICENSE). Vélib' Métropole data is
-published under the ODbL; data terms and attribution will be documented with
-the collector.
+The code is released under the [MIT License](LICENSE).
+
+Data sources and their terms:
+
+- Vélib' Métropole availability: [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/1-0/).
+- Weather forecasts: [Weather data by Open-Meteo.com](https://open-meteo.com/),
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), from Météo-France
+  models. Free API, non-commercial use.
+- French school calendar: Ministère de l'Éducation nationale,
+  [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).

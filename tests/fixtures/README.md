@@ -37,3 +37,14 @@ Vacances d'Été" record without an end).
 
 **Data licence.** Ministère de l'Éducation nationale, published under the
 [Licence Ouverte / Etalab 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
+
+## `weather/`
+
+`historical_forecast_paris.json`: one location of a real response from the
+Open-Meteo Historical Forecast API (model `meteofrance_seamless`, grid point
+48.86 N 2.35 E), downloaded on 9 November 2026 and cut down to 2 November 2026,
+a day with rain at 15:00, 17:00 and 18:00 UTC. Hourly and 15-minute values are
+copied verbatim; only the other days were removed.
+
+**Data licence.** [Weather data by Open-Meteo.com](https://open-meteo.com/),
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

@@ -1,4 +1,4 @@
-"""Shared fixtures: recorded Vélib' responses and their variants."""
+"""Shared fixtures: recorded Vélib' and Open-Meteo responses and their variants."""
 
 import json
 from collections.abc import Callable
@@ -11,6 +11,7 @@ import pytest
 from veloflow.collector.gbfs import RawResponse
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gbfs"
+WEATHER_FIXTURE = Path(__file__).parent / "fixtures" / "weather" / "historical_forecast_paris.json"
 FETCHED_AT = datetime(2026, 11, 5, 8, 0, 0, tzinfo=UTC)
 
 
@@ -31,5 +32,26 @@ def make_response() -> Callable[..., RawResponse]:
         if edit is not None:
             edit(feed)
         return RawResponse(content=json.dumps(feed).encode(), fetched_at=fetched_at)
+
+    return factory
+
+
+@pytest.fixture
+def location() -> dict[str, Any]:
+    """One location of a real Open-Meteo response: Paris, 2 November 2026, Météo-France."""
+    loaded: dict[str, Any] = json.loads(WEATHER_FIXTURE.read_bytes())
+    return loaded
+
+
+@pytest.fixture
+def body(location: dict[str, Any]) -> Callable[..., bytes]:
+    """Encode ``count`` copies of the location the way the API answers.
+
+    One location is a JSON object, several are a list.
+    """
+
+    def factory(count: int = 1) -> bytes:
+        payload: Any = location if count == 1 else [location] * count
+        return json.dumps(payload).encode()
 
     return factory
