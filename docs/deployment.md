@@ -69,6 +69,28 @@ gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-weather 
 gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
 ```
 
+## Getting the data on the laptop
+
+```powershell
+.\infra\sync\pull_data.ps1 -WhatIf   # list what would be downloaded
+.\infra\sync\pull_data.ps1           # download it into data\
+```
+
+The script copies only the small datasets, with the same layout as
+`/var/lib/veloflow`:
+
+| Dataset | Size | Use |
+|---|---|---|
+| `silver/station_status` | ~1.8 MB a day | Exploration, backtests, training |
+| `raw/weather_forecast` | ~110 KB a day | Train/serve gap of weather features |
+| `raw/station_information` | ~250 KB a day | Station reference (the network grows: 1,520 then 1,522 stations) |
+
+The raw `station_status` archive (~43 MB a day) stays on the VM as the backup
+the silver layer can be rebuilt from. A file is downloaded only when it is
+missing or its size changed, under a `.part` name first, then renamed: an
+interrupted run never leaves a truncated file behind. Running it twice in a row
+downloads nothing the second time.
+
 ## Monitoring
 
 Three checks on [healthchecks.io](https://healthchecks.io) (free plan) watch the
