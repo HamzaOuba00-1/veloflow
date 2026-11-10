@@ -26,5 +26,5 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/veloflow
-# Measured peak with a real response: 69 MB.
+# Measured peak on the VM: 96 MB (69 MB of process memory, plus page cache).
 MemoryMax=150M
