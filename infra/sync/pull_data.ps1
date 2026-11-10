@@ -9,6 +9,7 @@
         silver/station_status     Parquet, one file per UTC day (~1.8 MB)
         raw/weather_forecast      hourly forecast snapshots (~110 KB a day)
         raw/station_information   station reference, hourly (~250 KB a day)
+        quality/coverage          daily coverage report, JSON (~1 KB a day)
 
     The raw station_status archive (~43 MB a day) stays on the VM: it is the
     backup the silver layer can be rebuilt from (decision D10).
@@ -28,7 +29,7 @@ param(
     [string]$Name = "veloflow-collector",
     [string]$RemoteRoot = "/var/lib/veloflow",
     [string]$LocalRoot = (Join-Path $PSScriptRoot "..\..\data"),
-    [string[]]$Datasets = @("silver/station_status", "raw/weather_forecast", "raw/station_information")
+    [string[]]$Datasets = @("silver/station_status", "raw/weather_forecast", "raw/station_information", "quality/coverage")
 )
 
 $ErrorActionPreference = "Stop"

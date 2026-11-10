@@ -1,5 +1,5 @@
 [Unit]
-Description=VeloFlow: compact yesterday's raw station_status into Parquet
+Description=VeloFlow: compact yesterday's raw station_status into Parquet, then report its coverage
 Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/data/storage.md
 
 [Service]
@@ -8,6 +8,9 @@ User=veloflow
 Group=veloflow
 WorkingDirectory=/opt/veloflow/app
 ExecStart=/opt/veloflow/app/.venv/bin/veloflow-compact --data-dir /var/lib/veloflow
+# Rule R6 (docs/data/quality.md): reads the raw archive, never parses the feed.
+# Runs after the compaction, so a bug in the report never blocks the Parquet.
+ExecStart=/opt/veloflow/app/.venv/bin/veloflow-coverage --data-dir /var/lib/veloflow
 EnvironmentFile=-/etc/veloflow/veloflow.env
 # Report the exit status to the external monitor: /0 means success, anything
 # else raises an alert. "$$" is a literal "$" for systemd, expanded by sh.

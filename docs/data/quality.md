@@ -69,4 +69,6 @@ uv run veloflow-coverage --data-dir data --all               # every raw day
 ```
 
 Reports go to `data/quality/coverage/coverage_<day>.json`. They need the raw
-archive, so they are meant to run on the VM.
+archive, so they run on the VM every night right after the compaction
+(`veloflow-compact.service`), and `infra/sync/pull_data.ps1` brings them to the
+laptop.

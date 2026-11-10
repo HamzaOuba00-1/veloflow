@@ -9,7 +9,7 @@ runs is described by files in this repository.
 | `infra/gcp/create_collector_vm.ps1` | Creates the VM (run from the laptop, PowerShell) |
 | `infra/vm/setup.sh` | Installs or updates the collector on the VM (idempotent) |
 | `infra/vm/veloflow-collector.service` | systemd service: the collection loop |
-| `infra/vm/veloflow-compact.service` | systemd one-shot job: raw → Parquet for yesterday |
+| `infra/vm/veloflow-compact.service` | systemd one-shot job: raw → Parquet for yesterday, then its coverage report |
 | `infra/vm/veloflow-compact.timer` | Runs the job every night at 00:20 UTC |
 | `infra/vm/veloflow-weather.service` | systemd one-shot job: archive the current weather forecast |
 | `infra/vm/veloflow-weather.timer` | Runs it every hour at minute 7 (UTC) |
@@ -33,6 +33,7 @@ runs is described by files in this repository.
 | `/opt/veloflow/python` | Python 3.12 installed by uv |
 | `/var/lib/veloflow/raw` | Raw archive (bronze): GBFS responses from the collector, weather forecasts from the hourly job |
 | `/var/lib/veloflow/silver` | Parquet files (silver), written by the nightly job |
+| `/var/lib/veloflow/quality` | Daily coverage reports (JSON), written by the nightly job |
 
 All services run as the `veloflow` system user (no shell, no sudo), can write
 only to `/var/lib/veloflow`, and have a memory cap (300 MB for the collector,
@@ -84,6 +85,7 @@ The script copies only the small datasets, with the same layout as
 | `silver/station_status` | ~1.8 MB a day | Exploration, backtests, training |
 | `raw/weather_forecast` | ~110 KB a day | Train/serve gap of weather features |
 | `raw/station_information` | ~250 KB a day | Station reference (the network grows: 1,520 then 1,522 stations) |
+| `quality/coverage` | ~1 KB a day | Daily coverage report ([data quality](data/quality.md), rule R6) |
 
 The raw `station_status` archive (~43 MB a day) stays on the VM as the backup
 the silver layer can be rebuilt from. A file is downloaded only when it is
