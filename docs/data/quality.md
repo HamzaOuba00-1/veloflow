@@ -16,7 +16,7 @@ Measured on the first 36 hours of collection: 2,051 versions of
 | Closed stations | 3 not installed, 36 neither renting nor returning (9 Nov) | R3 |
 | Open stations that never change | 2 stations with no change over 24 h; a typical station changes 107 times a day | R4 |
 | The station reference moves | 2 stations added, 2 capacity changes, 1 station moved in 2.5 days | R5 |
-| Unusable or missing versions | 9 Nov: 1,418 usable, 20 degraded (published by the source), ~2 minutes silent | R6 |
+| Unusable or missing versions | 9 Nov: 1,418 usable, 20 degraded (published by the source), 9 versions never received | R6 |
 
 A version from the past differs from the next version about twice as much as
 the previous version does (for example 424 stations against 260 on 9 November
@@ -59,9 +59,33 @@ explained. A missing usable version has two causes, reported apart:
   publishes every 59-61 s), so at least one version was never received:
   collector down or source silent. The journal of the collector tells which.
 
-On 9 November: 20 source failures (1.4 %) and about 2 silent minutes. Raw files
-written before the collector learned to flag degraded versions (5 November)
-report them as `ok`.
+Measured on the VM (`veloflow-coverage --all`, 15 s and 146 MB for three days):
+
+| Day | Expected | Usable | Source failures | Silent |
+|---|---|---|---|---|
+| 8 Nov (from 13:20 UTC) | 642 | 98.60 % | 1.40 % | 0.00 % |
+| 9 Nov | 1,440 | 98.47 % | 1.39 % | 0.63 % (9 versions, 5 gaps) |
+| 10 Nov (partial) | 968 | 98.45 % | 1.55 % | 0.00 % |
+
+The shares can add up to slightly more than 100 %: a minute sometimes holds two
+responses (the stale versions of rule R1), so counting responses against
+minutes would hide gaps. The gaps are measured between consecutive responses
+instead.
+
+**The 5 gaps of 9 November are explained.** They all fall between 13:10 and
+15:09 UTC. Over that window the collector logged no failed request, only the
+two degraded versions it rejected (13:56 and 14:56, all 1,522 stations without
+a station code), and it kept pinging the external monitor after healthy polls.
+It was polling; the feed simply published no new state. All 9 missing versions
+are therefore on the source side, and the collector's own miss rate that day is
+0 %.
+
+Both degraded versions of that window came at minute 56 of the hour, with
+every station losing its code. Whether this is a schedule on the operator's
+side will be checked over more days.
+
+Raw files written before the collector learned to flag degraded versions
+(5 November) report them as `ok`.
 
 ```powershell
 uv run veloflow-coverage --data-dir data --date 2026-11-09   # one day
