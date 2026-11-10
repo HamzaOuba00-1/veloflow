@@ -74,6 +74,27 @@ recomputed on a longer period.
   24 hours is far beyond the 60-minute horizon on purpose: if snapshots fail
   for a while, the last one still covers the hours that follow.
 
+## Archived forecasts for training
+
+`veloflow-weather-history` downloads the Historical Forecast archive for the
+nine grid points and stores it in the silver layer, one Parquet file per UTC
+day and per resolution:
+
+```powershell
+uv run veloflow-weather-history --data-dir data --start 2026-11-08   # up to yesterday
+```
+
+| Dataset | Rows per day | Path |
+|---|---|---|
+| Hourly | 9 x 24 = 216 | `data/silver/weather_hourly/date=<day>/weather_hourly.parquet` |
+| 15 minutes | 9 x 96 = 864 | `data/silver/weather_15min/date=<day>/weather_15min.parquet` |
+
+Rows keep the provider's time convention (`valid_at` ends the interval of
+accumulated variables) and are filed under the UTC date of `valid_at`. A day
+whose values are all missing (not in the archive yet) is skipped, so a later
+run fills it. Requests cover at most 31 days. It runs on the laptop; the VM
+only archives the live forecast.
+
 Variables: temperature, relative humidity, precipitation, rain, WMO weather
 code, wind speed and gusts (hourly); temperature, precipitation and wind speed
 (15 minutes).
