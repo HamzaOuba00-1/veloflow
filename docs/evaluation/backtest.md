@@ -111,3 +111,70 @@ On 8-10 November the test days are 9 and 10 November (8 November is partial
 and only used for training). A full run with persistence takes 6.5 seconds
 and 1.2 GB of memory and passes the look-ahead check. Its results come with
 the baselines.
+
+## Baselines
+
+`veloflow.models.baselines`, the references of the acceptance criteria
+(design, section 4.5):
+
+- **persistence**: nothing changes; event probabilities are 0 or 1;
+- **profile**: the mean of the station on the same type of day (weekday or
+  weekend) and Paris 15-minute slot as the target, over the training days.
+  Its event probabilities are the historical frequencies of that slot, the
+  reference of criterion 3;
+- **persistence + profile change**: the state at the origin, moved by the
+  change the profile expects between the origin slot and the target slot,
+  between 0 and a cap. The cap is the largest total seen in training, or what
+  the station holds now if that is more: some stations hold more than ever
+  seen before (rule R2), and a first version that capped them at the training
+  maximum pushed forecasts below the current state. Event probabilities are
+  persistence calibrated on the training examples: the observed frequency of
+  `empty` at the target, by horizon and number of bikes at the origin (0, 1,
+  2, 3 or more); the same for `full` with docks.
+
+Where a slot was never seen in training, the profiles fall back on
+persistence.
+
+### First run: 9 and 10 November
+
+These numbers say more about the amount of data than about the baselines.
+On 9 November the only training data is the afternoon of Sunday 8, so there
+is no weekday profile at all: both profile baselines fall back on persistence
+for every example. On 10 November the profile comes from a single weekday,
+Monday 9 (10 % of its examples still fall back, mostly slots masked by the
+frozen feed of 9 November). A one-day "profile" is just what that station
+happened to hold the day before.
+
+Mean absolute error on 10 November, the only day with a profile
+(R4b stations left out):
+
+| Horizon | Persistence, mechanical / docks | Persistence + profile change | Profile |
+|---|---|---|---|
+| 15 min | **0.30** / **0.67** | 0.48 / 0.92 | 3.22 / 4.76 |
+| 30 min | **0.50** / **1.05** | 0.75 / 1.39 | 3.25 / 4.80 |
+| 60 min | **0.79** / **1.63** | 1.13 / 2.02 | 3.29 / 4.87 |
+
+With one day of history, persistence is by far the best count forecast, and
+adding the profile's expected change makes it worse. The profile baselines
+will be meaningful after a few weeks of weekdays and weekends.
+
+The event probabilities tell another story. Calibrated persistence needs
+little data: it pools every station into five classes per horizon. On both
+days (`empty`, R4b stations left out):
+
+| Horizon | Persistence: Brier / ECE / AUC-PR | Calibrated persistence | Profile |
+|---|---|---|---|
+| 15 min | 0.026 / 0.026 / 0.55 | **0.021** / **0.002** / **0.64** | 0.047 / 0.048 / 0.31 |
+| 30 min | 0.037 / 0.037 / 0.40 | **0.028** / **0.003** / **0.50** | 0.053 / 0.054 / 0.25 |
+| 60 min | 0.047 / 0.047 / 0.28 | **0.033** / **0.005** / **0.38** | 0.059 / 0.060 / 0.19 |
+
+Calibration alone lowers the Brier score of persistence by 19 % at 15
+minutes, 25 % at 30 and 29 % at 60, and brings its calibration error from
+0.026-0.047 to below 0.005. For a 0-or-1 forecast, ECE equals the Brier score,
+as the table shows.
+
+Leaving the R4b stations in changes the mean absolute error of persistence by
+less than 0.002: 7 suspected stations weigh 0.1 % of the examples.
+
+The three baselines run in 25 seconds and 1.6 GB on these two test days.
+Results will be compared with the acceptance criteria in the next step.

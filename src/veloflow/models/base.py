@@ -12,7 +12,7 @@ from typing import Protocol
 import polars as pl
 
 from veloflow.datasets import resample_status
-from veloflow.evaluation.examples import HORIZONS_MIN, build_examples
+from veloflow.evaluation.examples import HORIZONS_MIN, TARGETS, build_examples, flag_grid
 
 KEYS: tuple[str, ...] = ("station_id", "origin", "horizon_min")
 # What a forecaster may see of an example: when, for which station, and the
@@ -43,6 +43,18 @@ class TrainingData:
     frozen_slots: pl.DataFrame
     frozen_stations: pl.DataFrame
     cutoff: datetime
+
+    def states(self) -> pl.DataFrame:
+        """Trustworthy states on the 5-minute grid, before ``cutoff``.
+
+        Known, operational (R3), outside a frozen feed (R4a) and not suspected
+        frozen (R4b). Columns ``station_id``, ``time`` and the three counts.
+        """
+        grid = resample_status(self.history.filter(pl.col("fetched_at") < self.cutoff))
+        flags = flag_grid(grid, self.frozen_slots, self.frozen_stations)
+        return flags.filter(
+            pl.col("known") & pl.col("operational") & ~pl.col("frozen_feed") & ~pl.col("suspected")
+        ).select("station_id", "time", *TARGETS)
 
     def examples(self, horizons: tuple[int, ...] = HORIZONS_MIN) -> pl.DataFrame:
         """Training examples, built on demand: every target is before ``cutoff``.

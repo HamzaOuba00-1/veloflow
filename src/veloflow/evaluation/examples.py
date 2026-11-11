@@ -44,13 +44,18 @@ class ExampleSet:
     excluded: dict[str, int]
 
 
-def _flag_grid(
+def flag_grid(
     grid: pl.DataFrame,
     frozen_slots: pl.DataFrame | None,
     frozen_stations: pl.DataFrame | None,
-    slot: str,
+    slot: str = "15m",
 ) -> pl.DataFrame:
-    """Per grid row: state, and whether it is known, operational, frozen."""
+    """Per grid row: the state, and whether it is trustworthy.
+
+    Returns:
+        ``station_id``, ``time``, the three counts, and the flags ``known``,
+        ``operational`` (R3), ``frozen_feed`` (R4a) and ``suspected`` (R4b).
+    """
     flags = grid.select(
         "station_id",
         "time",
@@ -120,7 +125,7 @@ def build_examples(
         are the station-origin-horizon triples whose target time is on the
         grid.
     """
-    flags = _flag_grid(grid, frozen_slots, frozen_stations, slot)
+    flags = flag_grid(grid, frozen_slots, frozen_stations, slot)
     origin = flags.rename({"time": "origin"})
     target = flags.select(
         "station_id",
