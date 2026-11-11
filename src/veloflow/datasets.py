@@ -128,3 +128,48 @@ def load_station_information(data_dir: Path) -> pl.DataFrame:
     return pl.DataFrame(list(latest.values()), schema=INFORMATION_SCHEMA, orient="row").sort(
         "station_id"
     )
+
+
+def resample_status(frame: pl.DataFrame, every: str = "5m", tolerance: str = "5m") -> pl.DataFrame:
+    """State of every station on a regular time grid (as-of join).
+
+    At each grid time ``t``, a station takes the last version fetched at or
+    before ``t`` (never a later one: no look-ahead), provided that version is
+    at most ``tolerance`` old. Older states are left null instead of being
+    carried over a gap in the collection.
+
+    Args:
+        frame: rows from ``load_station_status``.
+        every: grid step, as a Polars duration string.
+        tolerance: maximum age of the state used at a grid time.
+
+    Returns:
+        One row per station and grid time: ``station_id``, ``time`` and the
+        other columns of ``frame``, null where no recent version exists.
+    """
+    if frame.height == 0:
+        return frame.with_columns(time=pl.col("fetched_at")).head(0)
+    start, end = frame.select(
+        pl.col("fetched_at").min().alias("start"), pl.col("fetched_at").max().alias("end")
+    ).row(0)
+    grid = pl.DataFrame(
+        {
+            "time": pl.datetime_range(
+                pl.lit(start).dt.truncate(every), end, every, eager=True, time_zone="UTC"
+            )
+        }
+    ).filter(pl.col("time") >= start)
+    stations = frame.select("station_id").unique()
+    left = stations.join(grid, how="cross").sort("time")
+    right = frame.sort("fetched_at")
+    return left.join_asof(
+        right,
+        left_on="time",
+        right_on="fetched_at",
+        by="station_id",
+        strategy="backward",
+        tolerance=tolerance,
+        # Both sides are sorted on the join key above; Polars cannot check
+        # it per station group and would warn.
+        check_sortedness=False,
+    ).sort("station_id", "time")

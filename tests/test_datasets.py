@@ -14,6 +14,7 @@ from veloflow.datasets import (
     INFORMATION_SCHEMA,
     load_station_information,
     load_station_status,
+    resample_status,
     silver_days,
 )
 from veloflow.storage.compaction import STATUS_SCHEMA, silver_path
@@ -94,3 +95,47 @@ def test_station_information_keeps_latest_attributes(
 
 def test_station_information_without_archive(tmp_path: Path) -> None:
     assert load_station_information(tmp_path).height == 0
+
+
+def status_rows(*versions: tuple[int, int]) -> pl.DataFrame:
+    """Station 1 with ``bikes`` mechanical bikes fetched at ``second`` past midnight."""
+    rows = [
+        (
+            MIDNIGHT + timedelta(seconds=second),
+            MIDNIGHT + timedelta(seconds=second),
+            1,
+            bikes,
+            0,
+            5,
+            True,
+            True,
+            True,
+            MIDNIGHT,
+        )
+        for second, bikes in versions
+    ]
+    return pl.DataFrame(rows, schema=STATUS_SCHEMA, orient="row")
+
+
+def test_resample_uses_the_last_version_before_each_grid_time() -> None:
+    # Versions at 00:00:08 (3 bikes) and 00:05:20 (4 bikes); grid every 5 min.
+    grid = resample_status(status_rows((8, 3), (320, 4), (610, 7)))
+
+    assert grid["time"].to_list() == [MIDNIGHT + timedelta(minutes=m) for m in (5, 10)]
+    # At 00:05 the 00:05:20 version does not exist yet: no look-ahead.
+    assert grid["mechanical"].to_list() == [3, 4]
+
+
+def test_resample_leaves_gaps_null_beyond_the_tolerance() -> None:
+    # Nothing between 00:00:08 and 00:20:08: at 00:10, 00:15 and 00:20 the
+    # last known state is more than 5 minutes old.
+    grid = resample_status(status_rows((8, 3), (1208, 6)), tolerance="5m")
+
+    assert grid["mechanical"].to_list() == [3, None, None, None]
+
+
+def test_resample_empty_frame() -> None:
+    grid = resample_status(pl.DataFrame(schema=STATUS_SCHEMA))
+
+    assert grid.height == 0
+    assert "time" in grid.columns
