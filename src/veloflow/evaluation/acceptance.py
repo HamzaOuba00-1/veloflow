@@ -6,9 +6,11 @@
 3. For P(empty) at 30 minutes: Brier skill score of at least 0.2 against the
    historical frequency (the profile's probabilities), and a calibration error
    (ECE) of at most 0.03.
+4. Coverage of the 80 % interval between 77 % and 83 %, for each count.
+5. No degradation of more than 15 % on a subgroup (``subgroups``).
 
-Criteria 4 to 7 (interval coverage, subgroups, new stations, decisions) need
-models and a simulator that do not exist yet.
+Criteria 6 and 7 (new stations, decisions in simulation) need a cold-start
+protocol and a simulator that do not exist yet.
 """
 
 from dataclasses import dataclass
@@ -21,6 +23,8 @@ MAE_GAIN_OVER_PERSISTENCE: dict[int, float] = {15: 0.10, 30: 0.20, 60: 0.30}
 EVENT_HORIZON_MIN = 30
 MIN_BRIER_SKILL = 0.2
 MAX_ECE = 0.03
+COVERAGE_RANGE = (0.77, 0.83)
+MAX_SUBGROUP_DEGRADATION = 0.15
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +44,10 @@ def _by_horizon(metrics: pl.DataFrame) -> dict[int, dict[str, float]]:
 
 
 def check_acceptance(
-    candidate: pl.DataFrame, persistence: pl.DataFrame, profile: pl.DataFrame
+    candidate: pl.DataFrame,
+    persistence: pl.DataFrame,
+    profile: pl.DataFrame,
+    subgroups: pl.DataFrame | None = None,
 ) -> list[Check]:
     """Compare a candidate with the two reference baselines.
 
@@ -48,6 +55,8 @@ def check_acceptance(
         candidate: ``metrics.all_metrics`` of the model, by ``horizon_min``.
         persistence: the same for persistence, on the same examples.
         profile: the same for the station profile, on the same examples.
+        subgroups: ``subgroups.subgroup_ratios`` of the candidate; subgroups
+            without any example are not checked.
 
     Returns:
         One check per criterion, horizon and quantity. A missing value fails.
@@ -110,4 +119,38 @@ def check_acceptance(
             ece is not None and ece <= MAX_ECE,
         )
     )
+    low, high = COVERAGE_RANGE
+    for horizon in sorted(model):
+        for name in TARGETS:
+            coverage = model[horizon].get(f"{name}_coverage")
+            checks.append(
+                Check(
+                    "4 coverage of the 80 % interval",
+                    horizon,
+                    name,
+                    coverage,
+                    low,
+                    coverage is not None and low <= coverage <= high,
+                )
+            )
+    if subgroups is not None:
+        overall = {
+            int(r["horizon_min"]): r["ratio"]
+            for r in subgroups.filter(pl.col("group") == "all").iter_rows(named=True)
+        }
+        for r in subgroups.filter(pl.col("group") != "all").iter_rows(named=True):
+            ratio_all = overall.get(int(r["horizon_min"]))
+            degradation = (
+                None if r["ratio"] is None or not ratio_all else r["ratio"] / ratio_all - 1.0
+            )
+            checks.append(
+                Check(
+                    "5 degradation on a subgroup",
+                    int(r["horizon_min"]),
+                    r["group"],
+                    degradation,
+                    MAX_SUBGROUP_DEGRADATION,
+                    degradation is not None and degradation <= MAX_SUBGROUP_DEGRADATION,
+                )
+            )
     return checks

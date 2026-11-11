@@ -7,7 +7,9 @@ import polars as pl
 import pytest
 
 from veloflow.evaluation.report import all_models, main, run
+from veloflow.features.build import make_context
 from veloflow.models.baselines import Persistence, ProfileDelta, StationProfile
+from veloflow.models.gbm import GradientBoosting
 
 
 def write_silver(status: pl.DataFrame, data_dir: Path) -> None:
@@ -80,3 +82,27 @@ def test_all_models_end_with_lightgbm(synthetic_status: pl.DataFrame, tmp_path: 
         "persistence_profile_delta",
         "lightgbm",
     ]
+
+
+def test_report_of_a_model_with_intervals(synthetic_status: pl.DataFrame, tmp_path: Path) -> None:
+    write_silver(synthetic_status, tmp_path)
+    stations = pl.DataFrame(
+        {"station_id": [1, 2], "lat": [48.8566, 48.8570], "lon": [2.3522, 2.3530]},
+        schema={"station_id": pl.Int64, "lat": pl.Float64, "lon": pl.Float64},
+    )
+    small: dict[str, object] = {
+        "n_estimators": 10,
+        "num_leaves": 7,
+        "min_child_samples": 5,
+        "verbose": -1,
+    }
+    gbm = GradientBoosting(make_context(stations), params=small)
+
+    report, metrics = run(
+        tmp_path, date(2026, 11, 8), date(2026, 11, 10), [Persistence(), StationProfile(), gbm]
+    )
+
+    assert "## 80 % intervals: coverage / mean width" in report
+    assert "## Subgroups" in report
+    assert "4 coverage of the 80 % interval" in report
+    assert "lightgbm" in metrics["model"].to_list()

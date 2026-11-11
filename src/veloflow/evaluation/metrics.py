@@ -110,7 +110,25 @@ def event_metrics(frame: pl.DataFrame, by: Sequence[str] = ("horizon_min",)) -> 
     return result.sort(keys)
 
 
+def interval_metrics(frame: pl.DataFrame, by: Sequence[str] = ("horizon_min",)) -> pl.DataFrame:
+    """Coverage and mean width of the 80 % intervals of each count.
+
+    Coverage is the share of targets inside ``[lo, hi]``, bounds included.
+    """
+    exprs: list[pl.Expr] = []
+    for name in TARGETS:
+        low, high, target = pl.col(f"lo_{name}"), pl.col(f"hi_{name}"), pl.col(f"y_{name}")
+        exprs += [
+            target.is_between(low, high).mean().alias(f"{name}_coverage"),
+            (high - low).mean().alias(f"{name}_width"),
+        ]
+    return frame.group_by(by).agg(exprs).sort(by)
+
+
 def all_metrics(frame: pl.DataFrame, by: Sequence[str] = ("horizon_min",)) -> pl.DataFrame:
-    """``regression_metrics`` and ``event_metrics`` side by side."""
+    """Regression, event and (when present) interval metrics side by side."""
     keys = list(by)
-    return regression_metrics(frame, keys).join(event_metrics(frame, keys).drop("n"), on=keys)
+    result = regression_metrics(frame, keys).join(event_metrics(frame, keys).drop("n"), on=keys)
+    if "lo_mechanical" in frame.columns:
+        result = result.join(interval_metrics(frame, keys), on=keys)
+    return result

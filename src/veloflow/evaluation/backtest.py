@@ -25,6 +25,7 @@ from veloflow.datasets import resample_status
 from veloflow.evaluation.examples import EXCLUSION_REASONS, HORIZONS_MIN, build_examples
 from veloflow.models.base import (
     INPUT_COLUMNS,
+    INTERVAL_COLUMNS,
     KEYS,
     PREDICTION_COLUMNS,
     Forecaster,
@@ -105,21 +106,36 @@ def evaluation_days(status: pl.DataFrame, min_coverage: float = MIN_DAY_COVERAGE
 def validate_predictions(examples: pl.DataFrame, predictions: pl.DataFrame) -> pl.DataFrame:
     """Join predictions to examples, refusing anything incomplete or out of range.
 
+    Interval columns (``INTERVAL_COLUMNS``) are kept when a model returns all
+    of them.
+
     Raises:
         InvalidPredictionError: missing columns, missing or duplicated
-            examples, null values, or a probability outside [0, 1].
+            examples, null values, a probability outside [0, 1], or an
+            interval whose lower bound is above its upper bound.
     """
     missing = [name for name in (*KEYS, *PREDICTION_COLUMNS) if name not in predictions.columns]
     if missing:
         raise InvalidPredictionError(f"missing columns: {missing}")
-    predictions = predictions.select(*KEYS, *PREDICTION_COLUMNS)
+    intervals = [name for name in INTERVAL_COLUMNS if name in predictions.columns]
+    if intervals and len(intervals) != len(INTERVAL_COLUMNS):
+        raise InvalidPredictionError(f"incomplete intervals: {intervals}")
+    predictions = predictions.select(*KEYS, *PREDICTION_COLUMNS, *intervals)
     if predictions.height != examples.height or predictions.select(KEYS).is_duplicated().any():
         raise InvalidPredictionError(
             f"{predictions.height} predictions for {examples.height} examples, or duplicates"
         )
     joined = examples.join(predictions, on=list(KEYS), how="left")
-    if joined.select(PREDICTION_COLUMNS).null_count().sum_horizontal().item() > 0:
+    if joined.select(*PREDICTION_COLUMNS, *intervals).null_count().sum_horizontal().item() > 0:
         raise InvalidPredictionError("some examples have no or null predictions")
+    if intervals:
+        reversed_bounds = joined.filter(
+            pl.any_horizontal(
+                [pl.col(f"lo_{n}") > pl.col(f"hi_{n}") for n in ("mechanical", "ebike", "docks")]
+            )
+        ).height
+        if reversed_bounds:
+            raise InvalidPredictionError(f"{reversed_bounds} intervals with lower > upper bound")
     outside = joined.filter(
         ~pl.col("p_empty").is_between(0.0, 1.0) | ~pl.col("p_full").is_between(0.0, 1.0)
     ).height

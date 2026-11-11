@@ -6,7 +6,13 @@ from datetime import UTC, datetime
 import polars as pl
 import pytest
 
-from veloflow.evaluation.metrics import event_metrics, regression_metrics, with_groups
+from veloflow.evaluation.metrics import (
+    all_metrics,
+    event_metrics,
+    interval_metrics,
+    regression_metrics,
+    with_groups,
+)
 
 
 def counts_frame() -> pl.DataFrame:
@@ -87,3 +93,29 @@ def test_groups_use_paris_time() -> None:
         (0, "weekday"),
         (8, "weekend"),
     ]
+
+
+def test_interval_coverage_includes_bounds() -> None:
+    frame = counts_frame().with_columns(
+        lo_mechanical=pl.Series([4.0, 1.0, 0.0]),  # 4 in [4, 5]; 0 not in [1, 2]
+        hi_mechanical=pl.Series([5.0, 2.0, 2.0]),
+        lo_ebike=pl.Series([0.0, 0.0, 0.0]),
+        hi_ebike=pl.Series([2.0, 2.0, 2.0]),
+        lo_docks=pl.Series([5.0, 9.0, 3.0]),
+        hi_docks=pl.Series([5.0, 9.0, 5.0]),
+    )
+
+    result = interval_metrics(frame)
+
+    row = result.row(0, named=True)
+    assert row["mechanical_coverage"] == 0.5
+    assert row["mechanical_width"] == 1.0
+    assert row["docks_coverage"] == 1.0
+    assert (
+        "mechanical_coverage"
+        in all_metrics(
+            frame.with_columns(
+                y_empty=pl.lit(False), p_empty=pl.lit(0.0), y_full=pl.lit(False), p_full=pl.lit(0.0)
+            )
+        ).columns
+    )

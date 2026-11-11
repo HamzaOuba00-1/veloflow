@@ -2,13 +2,19 @@
 
 from datetime import UTC, date, datetime
 
+import numpy as np
 import polars as pl
 import pytest
 
 from veloflow.evaluation.backtest import check_no_lookahead, day_bounds, run_backtest
 from veloflow.features.build import make_context
-from veloflow.models.base import KEYS, PREDICTION_COLUMNS, TrainingData
-from veloflow.models.gbm import GradientBoosting, daily_profile_sums, profile_features
+from veloflow.models.base import INTERVAL_COLUMNS, KEYS, PREDICTION_COLUMNS, TrainingData
+from veloflow.models.gbm import (
+    GradientBoosting,
+    conformal_half_width,
+    daily_profile_sums,
+    profile_features,
+)
 
 STATIONS = pl.DataFrame(
     {"station_id": [1, 2], "lat": [48.8566, 48.8570], "lon": [2.3522, 2.3530]},
@@ -48,6 +54,16 @@ def test_backtest_runs_and_passes_the_lookahead_check(synthetic_status: pl.DataF
     assert frame.height == sum(fold.kept for fold in result.folds) > 0
     assert frame.select(PREDICTION_COLUMNS).null_count().sum_horizontal().item() == 0
     assert frame.filter(~pl.col("p_empty").is_between(0, 1)).height == 0
+    # Every forecast sits inside its interval, and intervals stay within [0, cap].
+    for name in ("mechanical", "ebike", "docks"):
+        assert (
+            frame.filter(
+                (pl.col(f"lo_{name}") > pl.col(f"pred_{name}").round())
+                | (pl.col(f"hi_{name}") < pl.col(f"pred_{name}").round())
+                | (pl.col(f"lo_{name}") < 0)
+            ).height
+            == 0
+        )
     # Counts never go below zero.
     assert (
         frame.select(pl.min_horizontal("pred_mechanical", "pred_ebike", "pred_docks").min()).item()
@@ -78,7 +94,7 @@ def test_an_event_never_seen_in_training_gets_its_frequency(
     )
     predictions = forecaster.predict(never_full, examples)
 
-    assert predictions.columns == [*KEYS, *PREDICTION_COLUMNS]
+    assert predictions.columns == [*KEYS, *PREDICTION_COLUMNS, *INTERVAL_COLUMNS]
     assert predictions["p_full"].unique().to_list() == [0.0]
     check_no_lookahead(forecaster, never_full, examples, examples["origin"][10])
 
@@ -182,3 +198,14 @@ def test_a_horizon_without_training_examples_cannot_be_forecast(
     assert sorted(forecaster.models) == [15, 30]
     with pytest.raises(RuntimeError, match="no model for horizon 60"):
         forecaster.predict(synthetic_status, examples_of(synthetic_status, cutoff, 60, 4))
+
+
+def test_conformal_half_width_is_finite_sample_corrected() -> None:
+    errors = np.array([0, 0, 0, 0, 0, 0, 1, 1, -2, 3], dtype=float)
+
+    # n = 10: rank ceil(11 x 0.8) = 9, the 9th smallest |error| = 2.
+    assert conformal_half_width(errors) == 2.0
+    # n = 9 at 70 %: rank 7, the 7th smallest |error| = 1.
+    assert conformal_half_width(errors[:9], level=0.7) == 1.0
+    # Too few examples for the level: no finite guarantee.
+    assert conformal_half_width(np.array([1.0, 2.0])) == float("inf")

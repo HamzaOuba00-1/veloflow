@@ -161,6 +161,17 @@ def test_lookahead_check_passes_for_an_honest_model(synthetic_status: pl.DataFra
         (lambda p: pl.concat([p, p]), "duplicates"),
         (lambda p: p.with_columns(pred_docks=None), "null"),
         (lambda p: p.with_columns(p_empty=1.5), "outside"),
+        (lambda p: p.with_columns(lo_mechanical=0.0), "incomplete intervals"),
+        (
+            lambda p: p.with_columns(
+                **{
+                    f"{b}_{n}": pl.lit(v)
+                    for n in ("mechanical", "ebike", "docks")
+                    for b, v in (("lo", 3.0), ("hi", 1.0))
+                }
+            ),
+            "lower > upper",
+        ),
     ],
 )
 def test_invalid_predictions_are_refused(edit: object, message: str) -> None:

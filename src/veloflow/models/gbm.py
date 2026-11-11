@@ -8,7 +8,12 @@ For each horizon, on every station at once:
   origin plus that change, between 0 and a cap (as ``ProfileDelta``);
 * two classifiers forecast ``empty`` and ``full``. Their probabilities are
   calibrated by isotonic regression on the most recent 20 % of the training
-  origins, held out from the classifiers.
+  origins, held out from the classifiers;
+* 80 % intervals of the counts by split conformal prediction: the regressors
+  learn on the older 80 % of the origins; on the newest 20 %, ``k`` is the
+  smallest whole number such that ``rounded forecast ± k`` holds 80 % of the
+  targets (finite-sample corrected). Counts are whole numbers, so coverage
+  moves in steps and can land above 80 %.
 
 Features: ``features.build`` plus the station profile (mean state and event
 frequencies on the same type of day and slot, at the origin and at the
@@ -45,6 +50,7 @@ MODEL_COLUMNS: tuple[str, ...] = (
     *[f"origin_{name}" for name in PROFILE_COLUMNS],
 )
 CALIBRATION_SHARE = 0.2
+INTERVAL_LEVEL = 0.8
 
 
 def daily_profile_sums(states: pl.DataFrame) -> pl.DataFrame:
@@ -124,6 +130,20 @@ class _HorizonModels:
     regressors: dict[str, lgb.LGBMRegressor] = field(default_factory=dict)
     classifiers: dict[str, lgb.LGBMClassifier | float] = field(default_factory=dict)
     calibrators: dict[str, IsotonicRegression | None] = field(default_factory=dict)
+    half_widths: dict[str, float] = field(default_factory=dict)
+
+
+def conformal_half_width(errors: np.ndarray, level: float = INTERVAL_LEVEL) -> float:
+    """Smallest ``k`` such that ``|error| <= k`` on a share ``level`` of new cases.
+
+    Split conformal prediction: the ``ceil((n + 1) * level)``-th smallest
+    absolute error on held-out examples, or infinity when there are too few.
+    """
+    n = len(errors)
+    rank = int(np.ceil((n + 1) * level))
+    if rank > n:
+        return float("inf")
+    return float(np.sort(np.abs(errors))[rank - 1])
 
 
 class GradientBoosting:
@@ -185,12 +205,31 @@ class GradientBoosting:
             frame = self._matrix(subset.select(INPUT_COLUMNS), data.history, training=True)
             x = self._x(frame)
             models = _HorizonModels()
+            # Models learn on the older origins; calibration on the newest.
+            split = int(subset.height * (1 - CALIBRATION_SHARE))
+            held_out = subset[split:].join(
+                self.capacity, on="station_id", how="left", maintain_order="left"
+            )
+            cap = (
+                held_out.select(
+                    pl.max_horizontal(
+                        "capacity", (pl.col("mechanical") + pl.col("ebike") + pl.col("docks"))
+                    )
+                )
+                .to_series()
+                .cast(pl.Float64)
+                .to_numpy()
+            )
             for name in TARGETS:
                 change = (subset[f"y_{name}"] - subset[name]).cast(pl.Float32).to_numpy()
                 regressor = lgb.LGBMRegressor(objective="l1", **self.params)  # type: ignore[arg-type]
-                models.regressors[name] = regressor.fit(x, change)
-            # Classifiers learn on the older origins, calibration on the newest.
-            split = int(subset.height * (1 - CALIBRATION_SHARE))
+                models.regressors[name] = regressor.fit(x[:split], change[:split])
+                state = held_out[name].cast(pl.Float64).to_numpy()
+                forecast = np.minimum(
+                    np.maximum(state + np.asarray(regressor.predict(x[split:])), 0.0), cap
+                )
+                target = held_out[f"y_{name}"].cast(pl.Float64).to_numpy()
+                models.half_widths[name] = conformal_half_width(target - np.round(forecast))
             for event in EVENTS:
                 y = subset[f"y_{event}"].to_numpy().astype(np.int8)
                 if y[:split].min() == y[:split].max():
@@ -253,9 +292,8 @@ class GradientBoosting:
                 ]
             )
         joined = pl.concat(parts).sort("_row")
-        return joined.select(
-            *KEYS,
-            *[
+        forecasts = joined.with_columns(
+            [
                 pl.min_horizontal(
                     (pl.col(name).cast(pl.Float64) + pl.col(f"change_{name}")).clip(
                         lower_bound=0.0
@@ -263,7 +301,34 @@ class GradientBoosting:
                     pl.col("cap"),
                 ).alias(f"pred_{name}")
                 for name in TARGETS
+            ]
+        )
+        widths = pl.DataFrame(
+            [
+                {
+                    "horizon_min": h,
+                    **{f"k_{n}": m.half_widths.get(n, float("inf")) for n in TARGETS},
+                }
+                for h, m in self.models.items()
             ],
+            schema={"horizon_min": pl.Int16, **{f"k_{n}": pl.Float64 for n in TARGETS}},
+        )
+        forecasts = forecasts.join(widths, on="horizon_min", how="left", maintain_order="left")
+        return forecasts.select(
+            *KEYS,
+            *[f"pred_{name}" for name in TARGETS],
             pl.col("p_empty").clip(0.0, 1.0),
             pl.col("p_full").clip(0.0, 1.0),
+            *[
+                expr
+                for name in TARGETS
+                for expr in (
+                    (pl.col(f"pred_{name}").round() - pl.col(f"k_{name}"))
+                    .clip(lower_bound=0.0)
+                    .alias(f"lo_{name}"),
+                    pl.min_horizontal(
+                        pl.col(f"pred_{name}").round() + pl.col(f"k_{name}"), pl.col("cap")
+                    ).alias(f"hi_{name}"),
+                )
+            ],
         )

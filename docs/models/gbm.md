@@ -59,8 +59,42 @@ as expected with two days of history.
 Training and evaluating it on these two test days takes about 4 minutes on two
 CPU cores.
 
+## 80 % intervals (criterion 4)
+
+Split conformal prediction: the regressors learn on the older 80 % of the
+training origins; on the newest 20 %, `k` is the `ceil((n + 1) x 0.8)`-th
+smallest absolute error of the rounded forecast, one `k` per horizon and
+count. The interval is `rounded forecast ± k`, within 0 and the cap. A first
+version took NumPy's quantile, whose position is `(n - 1) x p`: one rank too
+far. A test with ten hand-written errors caught it.
+
+On 9-10 November the intervals are valid but too wide: coverage between
+82.7 % and 90.5 % (criterion 4 asks for 77-83 %), mean width 0.9 to 4.8.
+Counts are whole numbers, so coverage moves in steps: at 15 minutes `k` is
+0 or 1 (mean width 0.9 for mechanical bikes), and going from `± 0` to `± 1`
+jumps past 80 % to 86-90 %. No symmetric whole-number interval lands inside
+77-83 % there. Only docks at 30 minutes pass (82.7 %). Possible fixes, to weigh with more
+data: separate lower and upper `k`, or one `k` per group of stations
+(Mondrian conformal prediction).
+
+## Subgroups (criterion 5)
+
+`veloflow.evaluation.subgroups`: suburbs (station code from 21000, except the
+two 600xx stations on the Seine banks in Paris; 522 of 1,522 stations), peak
+hours (weekdays 07:00-10:00 and 17:00-20:00, Paris), rain (forecast of at
+least 0.1 mm in the target quarter hour) and weekend. A subgroup degrades when
+the model's error ratio to persistence (three counts summed) is more than 15 %
+above its ratio on all examples. Comparing ratios keeps a group that is harder
+for everyone, such as peak hours, from counting against the model.
+
+On 9-10 November LightGBM passes the 9 checks: its ratio moves by at most
++2.7 % in the suburbs, +1.4 % in the rain (26,773 examples, 9 November only:
+the weather of later days is not downloaded yet) and improves at peak hours
+(-1 % to -7 %). There is no weekend test day yet, so that subgroup is not
+checked. With criteria 1 to 5, LightGBM passes 21 of 38 checks.
+
 ## Known limits
 
 - Training examples are built for the whole history at every test day, then
   sampled; past a few weeks this will need sampling by day before building.
-- One model per horizon; quantiles and intervals come next (criterion 4).
+- Intervals over-cover (see above).

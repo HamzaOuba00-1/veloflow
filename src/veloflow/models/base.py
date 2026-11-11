@@ -25,6 +25,11 @@ PREDICTION_COLUMNS: tuple[str, ...] = (
     "p_empty",
     "p_full",
 )
+# Optional 80 % prediction intervals of the counts: a model returns all of
+# them or none.
+INTERVAL_COLUMNS: tuple[str, ...] = tuple(
+    f"{bound}_{name}" for name in ("mechanical", "ebike", "docks") for bound in ("lo", "hi")
+)
 
 
 @dataclass(frozen=True, slots=True)

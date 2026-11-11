@@ -196,9 +196,10 @@ before it. A first version only checked that data existed before and after a
 day: with the trial file of 5 November, the empty days of 6 and 7 November and
 the partial 8 November became test days. The report made it visible at once.
 
-`veloflow.evaluation.acceptance` checks criteria 1 to 3 of the design
-(section 4.5); criteria 4 to 7 need models and a simulator that do not exist
-yet. The candidate here is persistence + profile change, the only model that
+`veloflow.evaluation.acceptance` checks criteria 1 to 5 of the design
+(section 4.5): criteria 4 (intervals) and 5 (subgroups) since the LightGBM
+model, see [models/gbm.md](../models/gbm.md); criteria 6 and 7 need a
+cold-start protocol and a simulator that do not exist yet. The candidate here is persistence + profile change, the only model that
 is not itself a reference. On 9-10 November, with every silver day (the
 17-minute trial of 5 November included, which adds a Thursday-morning profile
 for two slots, so profile numbers differ slightly from the tables above), it

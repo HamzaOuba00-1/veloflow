@@ -24,6 +24,7 @@ from veloflow.evaluation.acceptance import Check, check_acceptance
 from veloflow.evaluation.backtest import BacktestResult, run_backtest
 from veloflow.evaluation.examples import EXCLUSION_REASONS, TARGETS
 from veloflow.evaluation.metrics import all_metrics, regression_metrics, with_groups
+from veloflow.evaluation.subgroups import SUBGROUPS, add_subgroups, subgroup_ratios
 from veloflow.features.build import make_context
 from veloflow.models.base import Forecaster
 from veloflow.models.baselines import Persistence, ProfileDelta, StationProfile
@@ -64,7 +65,10 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
 
 
 def render(
-    results: list[BacktestResult], checks: dict[str, list[Check]], generated: datetime
+    results: list[BacktestResult],
+    checks: dict[str, list[Check]],
+    generated: datetime,
+    subgroups: dict[str, pl.DataFrame] | None = None,
 ) -> str:
     """The Markdown report of a backtest run."""
     first = results[0]
@@ -146,7 +150,45 @@ def render(
         rows.append([f"{hour:02d}h", *cells])
     lines += _table(["Hour", *hourly], rows)
 
-    lines += ["", "## Acceptance criteria 1-3 (design, section 4.5)", ""]
+    with_intervals = {m: f for m, f in metrics.items() if "mechanical_coverage" in f.columns}
+    if with_intervals:
+        lines += ["", "## 80 % intervals: coverage / mean width", ""]
+        rows = [
+            [
+                model,
+                str(row["horizon_min"]),
+                *[
+                    f"{_fmt(row[f'{n}_coverage'], 3)} / {_fmt(row[f'{n}_width'], 1)}"
+                    for n in TARGETS
+                ],
+            ]
+            for model, frame in with_intervals.items()
+            for row in frame.iter_rows(named=True)
+        ]
+        lines += _table(["Model", "Horizon", *TARGETS], rows)
+    if subgroups:
+        lines += [
+            "",
+            "## Subgroups: error ratio to persistence (three counts), examples",
+            "",
+        ]
+        groups = ["all", *SUBGROUPS]
+        rows = []
+        for model, frame in subgroups.items():
+            for horizon in sorted(frame["horizon_min"].unique().to_list()):
+                cells = []
+                for group in groups:
+                    match = frame.filter(
+                        (pl.col("group") == group) & (pl.col("horizon_min") == horizon)
+                    )
+                    cells.append(
+                        f"{_fmt(match['ratio'].item(), 3)} ({match['n'].item():,})"
+                        if match.height
+                        else "n/a (0)"
+                    )
+                rows.append([model, str(horizon), *cells])
+        lines += _table(["Model", "Horizon", *groups], rows)
+    lines += ["", "## Acceptance criteria 1-5 (design, section 4.5)", ""]
     for model, model_checks in checks.items():
         passed = sum(check.passed for check in model_checks)
         lines += [f"### {model}: {passed} of {len(model_checks)} checks passed", ""]
@@ -182,15 +224,22 @@ def run(
         raise ValueError(f"no complete test day between {start} and {end}")
     metrics = {result.model: all_metrics(headline(result)) for result in results}
     persistence, profile = metrics[results[0].model], metrics[results[1].model]
+    stations, weather = load_station_information(data_dir), load_weather_15min(data_dir)
+    ratios = {
+        result.model: subgroup_ratios(add_subgroups(headline(result), stations, weather))
+        for result in results[2:]
+    }
     checks = {
-        result.model: check_acceptance(metrics[result.model], persistence, profile)
+        result.model: check_acceptance(
+            metrics[result.model], persistence, profile, ratios[result.model]
+        )
         for result in results[2:]
     }
     table = pl.concat(
         [frame.with_columns(model=pl.lit(model)) for model, frame in metrics.items()],
         how="diagonal",
     )
-    return render(results, checks, datetime.now(UTC)), table
+    return render(results, checks, datetime.now(UTC), ratios), table
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
