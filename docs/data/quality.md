@@ -97,7 +97,11 @@ Paris time): a station that does not move at night is normal. The station is
 suspected from the moment its run reaches 12 daytime hours, until its state
 changes (or the data ends). A typical station changes about 107 times a day,
 so 12 daytime hours without a single change is very unlikely for a working
-station.
+station. A gap of more than an hour between two versions of a station ends
+its run: nothing was observed during the gap, so it cannot count as time
+without change. Without this, the 17-minute trial run of 5 November turned
+25 stations that merely had the same state on 5 and 8 November into
+"frozen for 75 hours" (found by the backtest report, fixed before it counted).
 
 Measured on 8-10 November: 8 periods on 7 stations (out of about 1,500).
 

@@ -177,4 +177,41 @@ Leaving the R4b stations in changes the mean absolute error of persistence by
 less than 0.002: 7 suspected stations weigh 0.1 % of the examples.
 
 The three baselines run in 25 seconds and 1.6 GB on these two test days.
-Results will be compared with the acceptance criteria in the next step.
+
+## Report and acceptance criteria
+
+```powershell
+uv run veloflow-backtest --data-dir data                 # every silver day
+uv run veloflow-backtest --data-dir data --start 2026-11-08
+```
+
+The command runs every model of `report.baselines()` on the same test days
+and writes `data/reports/backtest/backtest_<start>_<end>.md` (examples per
+day, errors by horizon with skill against persistence, events, error by
+Paris hour, acceptance) and the metrics as Parquet. It takes 30 seconds and
+2.2 GB on 9-10 November.
+
+A test day must have at least 90 % of its 5-minute slots covered and data
+before it. A first version only checked that data existed before and after a
+day: with the trial file of 5 November, the empty days of 6 and 7 November and
+the partial 8 November became test days. The report made it visible at once.
+
+`veloflow.evaluation.acceptance` checks criteria 1 to 3 of the design
+(section 4.5); criteria 4 to 7 need models and a simulator that do not exist
+yet. The candidate here is persistence + profile change, the only model that
+is not itself a reference. On 9-10 November, with every silver day (the
+17-minute trial of 5 November included, which adds a Thursday-morning profile
+for two slots, so profile numbers differ slightly from the tables above), it
+passes 11 checks of 20:
+
+| Criterion | Result |
+|---|---|
+| 1. MAE at least 10/20/30 % below persistence | **fails** at every horizon: 13 % to 33 % *worse* |
+| 2. MAE below the station profile | passes at every horizon |
+| 3. Brier skill ≥ 0.2 against historical frequency, ECE ≤ 0.03 (empty, 30 min) | passes: 0.48 and 0.003 |
+
+Read with the amount of data in mind: criteria 2 and 3 are passed against a
+profile learned from at most one weekday, a weak reference. Criterion 1 is
+the honest summary: nothing beats persistence on counts yet. The bench, the
+references and the criteria are now fixed; the same command will be rerun as
+the history grows and when real models arrive.

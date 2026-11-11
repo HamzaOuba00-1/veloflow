@@ -108,3 +108,9 @@ def event_metrics(frame: pl.DataFrame, by: Sequence[str] = ("horizon_min",)) -> 
     for event in EVENTS:
         result = result.join(_event_metrics(frame, keys, event), on=keys)
     return result.sort(keys)
+
+
+def all_metrics(frame: pl.DataFrame, by: Sequence[str] = ("horizon_min",)) -> pl.DataFrame:
+    """``regression_metrics`` and ``event_metrics`` side by side."""
+    keys = list(by)
+    return regression_metrics(frame, keys).join(event_metrics(frame, keys).drop("n"), on=keys)

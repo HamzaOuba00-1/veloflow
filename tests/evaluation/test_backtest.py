@@ -69,8 +69,21 @@ def test_day_bounds_follow_paris_clock_changes() -> None:
 
 
 def test_evaluation_days_are_complete_and_have_a_past(synthetic_status: pl.DataFrame) -> None:
+    # Day 8 starts at 13:00 Paris: partial, and nothing before it.
     assert evaluation_days(synthetic_status) == [date(2026, 11, 9), date(2026, 11, 10)]
     assert evaluation_days(synthetic_status.head(0)) == []
+
+
+def test_days_the_collector_missed_are_not_test_days(synthetic_status: pl.DataFrame) -> None:
+    start, end = day_bounds(date(2026, 11, 9))
+    missed_day = synthetic_status.filter(~pl.col("fetched_at").is_between(start, end))
+    half_day = synthetic_status.filter(
+        ~pl.col("fetched_at").is_between(start + timedelta(hours=12), end)
+    )
+
+    assert evaluation_days(missed_day) == [date(2026, 11, 10)]
+    assert evaluation_days(half_day) == [date(2026, 11, 10)]
+    assert evaluation_days(half_day, min_coverage=0.5) == [date(2026, 11, 9), date(2026, 11, 10)]
 
 
 def test_persistence_end_to_end(synthetic_status: pl.DataFrame) -> None:

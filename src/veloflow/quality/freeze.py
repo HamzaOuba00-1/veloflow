@@ -149,6 +149,7 @@ def suspected_frozen_stations(
     min_daytime_hours: float = 12.0,
     day_start_hour: int = 7,
     day_end_hour: int = 22,
+    max_gap_minutes: int = 60,
 ) -> pl.DataFrame:
     """Rule R4b: periods during which a station is suspected frozen.
 
@@ -158,6 +159,10 @@ def suspected_frozen_stations(
     suspected frozen from the version where it reaches ``min_daytime_hours``
     until the run ends (next change, or end of data).
 
+    A gap of more than ``max_gap_minutes`` between two versions of a station
+    (collection stopped) ends the run: nothing was observed during the gap,
+    so it cannot count as time without change.
+
     Returns:
         Columns ``station_id``, ``frozen_from``, ``frozen_until`` (UTC) and
         ``daytime_hours`` (daytime length of the whole run).
@@ -166,14 +171,25 @@ def suspected_frozen_stations(
         frame.filter(pl.col("operational"))
         .sort("station_id", "fetched_at")
         .with_columns(
-            changed=pl.any_horizontal(
+            state_changed=pl.any_horizontal(
                 [(pl.col(name) != pl.col(name).shift(1).over("station_id")) for name in STATE]
             ).fill_null(value=True),
+            after_gap=(
+                pl.col("fetched_at") - pl.col("fetched_at").shift(1).over("station_id")
+                > pl.duration(minutes=max_gap_minutes)
+            ).fill_null(value=False),
             local_hour=pl.col("fetched_at").dt.convert_time_zone(PARIS).dt.hour(),
             gap_h=(pl.col("fetched_at").shift(-1).over("station_id") - pl.col("fetched_at"))
             .dt.total_seconds()
             .fill_null(0)
             / 3600,
+        )
+        .with_columns(
+            changed=pl.col("state_changed") | pl.col("after_gap"),
+            # Time to the next version is observed only if it is not a gap.
+            gap_h=pl.when(pl.col("gap_h") * 60 > max_gap_minutes)
+            .then(0.0)
+            .otherwise(pl.col("gap_h")),
         )
         .with_columns(
             run=pl.col("changed").cast(pl.Int32).cum_sum().over("station_id"),
@@ -197,7 +213,8 @@ def suspected_frozen_stations(
         pl.col("fetched_at").max().alias("last_version"),
         pl.col("daytime_gap_h").sum().alias("daytime_hours"),
     )
-    next_change = stations.filter(pl.col("changed")).select(
+    # A run cut by a gap ends at its last version, not after the gap.
+    next_change = stations.filter(pl.col("state_changed") & ~pl.col("after_gap")).select(
         "station_id", (pl.col("run") - 1).alias("run"), pl.col("fetched_at").alias("next_change")
     )
     return (

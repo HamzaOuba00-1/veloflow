@@ -148,3 +148,27 @@ def test_hourly_slots_and_unsupported_durations() -> None:
     ]
     with pytest.raises(ValueError, match="unsupported duration"):
         frozen_feed_slots(counts(per_minute), slot="30s")
+
+
+def test_a_collection_gap_ends_the_run() -> None:
+    # Unchanged from Monday 06:00 to 12:00 UTC, then nothing until Wednesday
+    # 06:00, then unchanged again until 12:00: never 12 observed daytime
+    # hours in a row, even though the state is the same throughout.
+    monday = [MONDAY + timedelta(hours=6, minutes=30 * k) for k in range(13)]
+    wednesday = [t + timedelta(days=2) for t in monday]
+    rows = [(t, 9, 4, True) for t in monday + wednesday]
+
+    assert suspected_frozen_stations(status(rows)).height == 0
+
+
+def test_a_run_cut_by_a_gap_ends_at_its_last_version() -> None:
+    # Twelve daytime hours reached on Monday 18:00 UTC, last version 20:30,
+    # then the collection stops until Tuesday 06:00.
+    monday = [MONDAY + timedelta(hours=6, minutes=30 * k) for k in range(30)]
+    tuesday = [MONDAY + timedelta(days=1, hours=6, minutes=30 * k) for k in range(3)]
+
+    frozen = suspected_frozen_stations(status([(t, 5, 4, True) for t in monday + tuesday]))
+
+    assert frozen.select("frozen_from", "frozen_until").rows() == [
+        (MONDAY + timedelta(hours=18), monday[-1])
+    ]

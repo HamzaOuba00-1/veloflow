@@ -36,8 +36,10 @@ logger = logging.getLogger(__name__)
 
 PARIS = ZoneInfo("Europe/Paris")
 GRID_TOLERANCE = timedelta(minutes=5)
-# A Paris day is complete when the collection covers it to within this margin.
-COMPLETE_MARGIN = timedelta(minutes=10)
+# A Paris day is a test day when at least this share of its 5-minute slots
+# holds a version (rule R6 reports the gaps in detail).
+MIN_DAY_COVERAGE = 0.9
+COVERAGE_SLOT = timedelta(minutes=5)
 
 
 class InvalidPredictionError(ValueError):
@@ -75,22 +77,28 @@ def day_bounds(day: date) -> tuple[datetime, datetime]:
     return start.astimezone(ZoneInfo("UTC")), end.astimezone(ZoneInfo("UTC"))
 
 
-def evaluation_days(status: pl.DataFrame) -> list[date]:
-    """Complete Paris days of ``status`` that have data before them."""
+def evaluation_days(status: pl.DataFrame, min_coverage: float = MIN_DAY_COVERAGE) -> list[date]:
+    """Paris days of ``status`` that are covered and have data before them.
+
+    A day is covered when at least ``min_coverage`` of its 5-minute slots
+    hold a version: a partial first day, or a day the collector missed, is
+    not a test day.
+    """
     if status.height == 0:
         return []
-    first, last = status.select(
-        pl.col("fetched_at").min().alias("first"), pl.col("fetched_at").max().alias("last")
-    ).row(0)
-    day = first.astimezone(PARIS).date()
+    first = status["fetched_at"].min()
+    slots = (
+        status.select(pl.col("fetched_at").dt.truncate("5m").unique())
+        .with_columns(day=pl.col("fetched_at").dt.convert_time_zone(str(PARIS)).dt.date())
+        .group_by("day")
+        .len()
+    )
     days = []
-    while True:
+    for day, count in sorted(slots.iter_rows()):
         start, end = day_bounds(day)
-        if end - COMPLETE_MARGIN > last:
-            break
-        if first <= start - COMPLETE_MARGIN:
+        expected = (end - start) / COVERAGE_SLOT
+        if count >= min_coverage * expected and first < start:  # type: ignore[operator]
             days.append(day)
-        day += timedelta(days=1)
     return days
 
 

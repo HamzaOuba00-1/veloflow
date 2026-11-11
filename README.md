@@ -16,7 +16,7 @@ that the station will be empty or full.
 - [x] Data collector, running 24/7 since 8 November 2026 ([deployment](docs/deployment.md))
 - [x] Data quality and context data ([quality](docs/data/quality.md), [weather](docs/data/weather.md), [calendar](docs/data/calendar.md), [bike counts](docs/data/counters.md))
 - [x] Exploratory data analysis ([findings](docs/data/eda.md))
-- [ ] Backtesting and baselines
+- [x] Backtesting and baselines ([protocol and results](docs/evaluation/backtest.md))
 
 ## Development
 
