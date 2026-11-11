@@ -26,6 +26,7 @@ veloflow-refresh-school-holidays = "veloflow.context.school_holidays:main"
 veloflow-weather-snapshot = "veloflow.weather.snapshot:main"
 veloflow-weather-history = "veloflow.weather.history:main"
 veloflow-coverage = "veloflow.quality.coverage:main"
+veloflow-counters = "veloflow.context.counters:main"
 
 [build-system]
 requires = ["hatchling"]

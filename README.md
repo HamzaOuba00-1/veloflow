@@ -38,5 +38,7 @@ Data sources and their terms:
 - Weather forecasts: [Weather data by Open-Meteo.com](https://open-meteo.com/),
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), from Météo-France
   models. Free API, non-commercial use.
+- Bike counts: Ville de Paris, Direction de la Voirie et des Déplacements,
+  [ODbL](https://opendatacommons.org/licenses/odbl/1-0/).
 - French school calendar: Ministère de l'Éducation nationale,
   [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
