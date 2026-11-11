@@ -130,7 +130,12 @@ def load_station_information(data_dir: Path) -> pl.DataFrame:
     )
 
 
-def resample_status(frame: pl.DataFrame, every: str = "5m", tolerance: str = "5m") -> pl.DataFrame:
+def resample_status(
+    frame: pl.DataFrame,
+    every: str = "5m",
+    tolerance: str = "5m",
+    end: datetime | None = None,
+) -> pl.DataFrame:
     """State of every station on a regular time grid (as-of join).
 
     At each grid time ``t``, a station takes the last version fetched at or
@@ -142,6 +147,9 @@ def resample_status(frame: pl.DataFrame, every: str = "5m", tolerance: str = "5m
         frame: rows from ``load_station_status``.
         every: grid step, as a Polars duration string.
         tolerance: maximum age of the state used at a grid time.
+        end: last grid time; by default the last fetch. A forecaster running
+            at ``t`` needs the grid point ``t`` even if the last version was
+            fetched a few seconds before.
 
     Returns:
         One row per station and grid time: ``station_id``, ``time`` and the
@@ -149,9 +157,10 @@ def resample_status(frame: pl.DataFrame, every: str = "5m", tolerance: str = "5m
     """
     if frame.height == 0:
         return frame.with_columns(time=pl.col("fetched_at")).head(0)
-    start, end = frame.select(
+    start, last = frame.select(
         pl.col("fetched_at").min().alias("start"), pl.col("fetched_at").max().alias("end")
     ).row(0)
+    end = last if end is None else end
     grid = pl.DataFrame(
         {
             "time": pl.datetime_range(

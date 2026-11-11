@@ -139,3 +139,13 @@ def test_resample_empty_frame() -> None:
 
     assert grid.height == 0
     assert "time" in grid.columns
+
+
+def test_resample_can_extend_the_grid_to_a_given_time() -> None:
+    # Last version at 00:10:10; a forecaster running at 00:15 needs that grid
+    # point, which holds the 00:10:10 state (under 5 minutes old). At 00:10
+    # that version does not exist yet and 00:00:08 is too old: unknown.
+    grid = resample_status(status_rows((8, 3), (610, 7)), end=MIDNIGHT + timedelta(minutes=15))
+
+    assert grid["time"].to_list() == [MIDNIGHT + timedelta(minutes=m) for m in (5, 10, 15)]
+    assert grid["mechanical"].to_list() == [3, None, 7]
