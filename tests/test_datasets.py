@@ -149,3 +149,20 @@ def test_resample_can_extend_the_grid_to_a_given_time() -> None:
 
     assert grid["time"].to_list() == [MIDNIGHT + timedelta(minutes=m) for m in (5, 10, 15)]
     assert grid["mechanical"].to_list() == [3, None, 7]
+
+
+def test_weather_is_read_from_every_silver_day(tmp_path: Path) -> None:
+    from veloflow.datasets import load_weather_15min
+
+    assert load_weather_15min(tmp_path) is None
+    for day in (8, 9):
+        folder = tmp_path / "silver" / "weather_15min" / f"date=2026-11-0{day}"
+        folder.mkdir(parents=True)
+        pl.DataFrame({"point": ["C"], "temperature_2m": [float(day)]}).write_parquet(
+            folder / "weather_15min.parquet"
+        )
+
+    weather = load_weather_15min(tmp_path)
+
+    assert weather is not None
+    assert weather["temperature_2m"].to_list() == [8.0, 9.0]

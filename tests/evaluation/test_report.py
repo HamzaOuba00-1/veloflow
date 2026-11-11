@@ -6,7 +6,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from veloflow.evaluation.report import main, run
+from veloflow.evaluation.report import all_models, main, run
 from veloflow.models.baselines import Persistence, ProfileDelta, StationProfile
 
 
@@ -48,7 +48,7 @@ def test_report_covers_every_section(synthetic_status: pl.DataFrame, tmp_path: P
 def test_command_writes_report_and_metrics(synthetic_status: pl.DataFrame, tmp_path: Path) -> None:
     write_silver(synthetic_status, tmp_path)
 
-    assert main(["--data-dir", str(tmp_path)]) == 0
+    assert main(["--data-dir", str(tmp_path), "--baselines-only"]) == 0
 
     folder = tmp_path / "reports" / "backtest"
     assert (
@@ -65,5 +65,18 @@ def test_command_fails_without_data_or_test_day(
     assert main(["--data-dir", str(tmp_path)]) == 1
 
     write_silver(synthetic_status, tmp_path)
-    assert main(["--data-dir", str(tmp_path), "--end", "2026-11-08"]) == 1
+    assert main(["--data-dir", str(tmp_path), "--end", "2026-11-08", "--baselines-only"]) == 1
     assert "no complete test day" in caplog.text
+
+
+def test_all_models_end_with_lightgbm(synthetic_status: pl.DataFrame, tmp_path: Path) -> None:
+    write_silver(synthetic_status, tmp_path)
+
+    models = all_models(tmp_path)
+
+    assert [model.name for model in models] == [
+        "persistence",
+        "profile",
+        "persistence_profile_delta",
+        "lightgbm",
+    ]

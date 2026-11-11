@@ -14,13 +14,20 @@ from pathlib import Path
 
 import polars as pl
 
-from veloflow.datasets import load_station_status, silver_days
+from veloflow.datasets import (
+    load_station_information,
+    load_station_status,
+    load_weather_15min,
+    silver_days,
+)
 from veloflow.evaluation.acceptance import Check, check_acceptance
 from veloflow.evaluation.backtest import BacktestResult, run_backtest
 from veloflow.evaluation.examples import EXCLUSION_REASONS, TARGETS
 from veloflow.evaluation.metrics import all_metrics, regression_metrics, with_groups
+from veloflow.features.build import make_context
 from veloflow.models.base import Forecaster
 from veloflow.models.baselines import Persistence, ProfileDelta, StationProfile
+from veloflow.models.gbm import GradientBoosting
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +38,12 @@ HOURLY_HORIZON_MIN = 60
 def baselines() -> list[Forecaster]:
     """The models of the report; the first two are the references."""
     return [Persistence(), StationProfile(), ProfileDelta()]
+
+
+def all_models(data_dir: Path) -> list[Forecaster]:
+    """The baselines, then LightGBM with the station reference and weather."""
+    context = make_context(load_station_information(data_dir), load_weather_15min(data_dir))
+    return [*baselines(), GradientBoosting(context)]
 
 
 def headline(result: BacktestResult) -> pl.DataFrame:
@@ -186,6 +199,9 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--start", type=date.fromisoformat, help="first silver day (UTC)")
     parser.add_argument("--end", type=date.fromisoformat, help="last silver day (UTC)")
+    parser.add_argument(
+        "--baselines-only", action="store_true", help="skip LightGBM (seconds instead of minutes)"
+    )
     return parser.parse_args(argv)
 
 
@@ -199,7 +215,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     start, end = args.start or days[0], args.end or days[-1]
     try:
-        report, metrics = run(args.data_dir, start, end, baselines())
+        models = baselines() if args.baselines_only else all_models(args.data_dir)
+        report, metrics = run(args.data_dir, start, end, models)
     except ValueError as error:
         logger.error("%s", error)
         return 1

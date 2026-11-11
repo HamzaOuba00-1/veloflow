@@ -12,9 +12,11 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "holidays>=0.108",
     "httpx>=0.28.1",
+    "lightgbm>=4.6",
     "polars>=2.1.0",
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
+    "scikit-learn>=1.7",
     "tzdata>=2026.6",
 ]
 
@@ -75,6 +77,11 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 files = ["src", "tests", "scripts"]
+
+# scikit-learn ships no type information.
+[[tool.mypy.overrides]]
+module = ["sklearn.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"

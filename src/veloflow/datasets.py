@@ -182,3 +182,9 @@ def resample_status(
         # it per station group and would warn.
         check_sortedness=False,
     ).sort("station_id", "time")
+
+
+def load_weather_15min(data_dir: Path) -> pl.DataFrame | None:
+    """Silver 15-minute weather forecasts of every day, or None if there are none."""
+    files = sorted((data_dir / "silver" / "weather_15min").glob("date=*/weather_15min.parquet"))
+    return pl.concat([pl.read_parquet(path) for path in files]) if files else None
