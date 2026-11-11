@@ -17,6 +17,7 @@ be reported with and without them.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import polars as pl
 
@@ -96,6 +97,7 @@ def build_examples(
     frozen_slots: pl.DataFrame | None = None,
     frozen_stations: pl.DataFrame | None = None,
     slot: str = "15m",
+    origin_range: tuple[datetime, datetime] | None = None,
 ) -> ExampleSet:
     """Build the evaluation examples of a regular grid.
 
@@ -106,6 +108,8 @@ def build_examples(
         frozen_stations: output of ``quality.freeze.suspected_frozen_stations``
             (R4b).
         slot: slot length used to compute ``frozen_slots``.
+        origin_range: if given, only origins in ``[start, end)`` are
+            candidates (a test day of the backtest).
 
     Returns:
         Kept examples with columns ``station_id``, ``origin``, ``horizon_min``,
@@ -153,6 +157,8 @@ def build_examples(
             .with_columns(reason=reason)
         )
     candidates = pl.concat(parts)
+    if origin_range is not None:
+        candidates = candidates.filter(pl.col("origin").is_between(*origin_range, closed="left"))
     counts = dict(
         candidates.filter(pl.col("reason").is_not_null()).group_by("reason").len().iter_rows()
     )

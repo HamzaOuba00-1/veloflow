@@ -2,10 +2,11 @@
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import polars as pl
 import pytest
 
 from veloflow.collector.gbfs import RawResponse
@@ -55,3 +56,24 @@ def body(location: dict[str, Any]) -> Callable[..., bytes]:
         return json.dumps(payload).encode()
 
     return factory
+
+
+@pytest.fixture(scope="session")
+def synthetic_status() -> pl.DataFrame:
+    """Cleaned ``station_status`` rows: two stations, a version every 5 minutes.
+
+    From 8 November 2026 12:00 UTC (13:00 Paris) to 10 November 23:55 UTC, so
+    Paris days 9 and 10 are complete and 8 is not. Both stations change at
+    every version; station 1 is empty every fifth version, station 2 full.
+    """
+
+    from veloflow.quality.versions import with_operational
+    from veloflow.storage.compaction import STATUS_SCHEMA
+
+    start = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
+    rows = []
+    for k in range(int((datetime(2026, 11, 11, tzinfo=UTC) - start).total_seconds() // 300)):
+        t = start + k * timedelta(minutes=5)
+        rows.append((t, t, 1, k % 5, 0, 10 - k % 5, True, True, True, t))
+        rows.append((t, t, 2, 1 + k % 3, k % 2, (k + 1) % 4, True, True, True, t))
+    return with_operational(pl.DataFrame(rows, schema=STATUS_SCHEMA, orient="row"))
