@@ -10,15 +10,15 @@ Source: "Comptage vélo - Historique - Données Compteurs et Sites de comptage",
 Ville de Paris, Direction de la Voirie et des Déplacements, under the Open
 Database License (ODbL). One zipped CSV per year.
 
-What the yearly CSV does (measured on 2025, docs/data/counters.md):
-
-* it is not UTF-8 (Latin-1): only identifiers and numbers are kept, so the
-  broken accents of the names do not matter;
-* counts of 1,000 and more use a non-breaking space as thousands separator;
-* timestamps carry their UTC offset and **label the start** of the counted
-  hour (the year runs from 00:00 to 23:00);
-* rows without a counter identifier (8,759 in 2025, one a hour, with counts
-  up to 13,057 and no coordinates) are not a counter: they are dropped.
+The yearly files do not share one format (measured on 2016-2025,
+docs/data/counters.md): the separator is ``;`` or ``,``; the encoding UTF-8
+(sometimes with a byte order mark) or Latin-1; counts may be written ``12.0``
+or ``1 022`` (non-breaking space); timestamps come in three forms, two with a
+UTC offset and one in local Paris time without any; coordinates are written
+``lat,lon`` or ``lat, lon``; some zips carry macOS metadata files. In every
+year a timestamp **starts** the counted hour. Rows without a counter
+identifier (one a hour in 2025, with counts up to 13,057) are not a counter
+and are dropped.
 
 Output, one Parquet file per year (the zipped CSV is kept as the raw copy)::
 
@@ -59,8 +59,8 @@ COUNTS_SCHEMA: dict[str, pl.DataType] = {
     "count": pl.Int32(),
 }
 
-# Source header -> our column. The coordinates header has a broken accent in
-# the source encoding, so it is matched by its prefix.
+# Source header -> our column. The coordinates header is matched by its
+# prefix: its accents differ with the encoding of each year.
 _COLUMNS = {
     "Identifiant du compteur": "counter_id",
     "Identifiant du site de comptage": "site_id",
@@ -68,11 +68,42 @@ _COLUMNS = {
     "Date et heure de comptage": "time",
 }
 _COORDINATES_PREFIX = "Coordonn"
-_TIME_FORMAT = "%Y-%m-%d %H:%M:%S%.3f %z"
+_BOM = "\ufeff"
+PARIS = "Europe/Paris"
 
 
 class CountersFormatError(Exception):
     """A yearly file does not have the expected structure."""
+
+
+def _separator(path: Path) -> str:
+    """``;`` (2016-2024) or ``,`` (2025), whichever splits the header more."""
+    with path.open("rb") as file:
+        header = file.readline()
+    return ";" if header.count(b";") > header.count(b",") else ","
+
+
+def _hour_start(time: pl.Expr, counter: pl.Expr) -> pl.Expr:
+    """UTC start of the counted hour, from any of the three timestamp forms.
+
+    ``2025-01-01 00:00:00.000 +0100`` and ``2018-11-29T01:00:00+01:00`` carry
+    their offset. ``2016-01-01T00:00:00`` is local Paris time: when clocks go
+    back, the repeated hour is read as the first one on its first appearance
+    for a counter and as the second one after; the hour skipped when clocks go
+    forward cannot exist and becomes null.
+    """
+    with_offset = pl.coalesce(
+        time.str.to_datetime("%Y-%m-%d %H:%M:%S%.3f %z", strict=False),
+        time.str.to_datetime("%Y-%m-%dT%H:%M:%S%:z", strict=False),
+    ).dt.convert_time_zone("UTC")
+    naive = time.str.to_datetime("%Y-%m-%dT%H:%M:%S", strict=False)
+    repeated = naive.is_first_distinct().over(counter)
+    local = naive.dt.replace_time_zone(
+        PARIS,
+        ambiguous=pl.when(repeated).then(pl.lit("earliest")).otherwise(pl.lit("latest")),
+        non_existent="null",
+    ).dt.convert_time_zone("UTC")
+    return pl.coalesce(with_offset, local).dt.cast_time_unit("us")
 
 
 def read_counts_csv(path: Path) -> pl.DataFrame:
@@ -82,10 +113,12 @@ def read_counts_csv(path: Path) -> pl.DataFrame:
         CountersFormatError: a column is missing, or a timestamp or a count
             cannot be read.
     """
-    frame = pl.scan_csv(path, encoding="utf8-lossy", infer_schema=False)
-    names = frame.collect_schema().names()
+    frame = pl.scan_csv(path, separator=_separator(path), encoding="utf8-lossy", infer_schema=False)
+    names = {name.removeprefix(_BOM): name for name in frame.collect_schema().names()}
     missing = [name for name in _COLUMNS if name not in names]
-    coordinates = next((name for name in names if name.startswith(_COORDINATES_PREFIX)), None)
+    coordinates = next(
+        (names[name] for name in names if name.startswith(_COORDINATES_PREFIX)), None
+    )
     if missing or coordinates is None:
         raise CountersFormatError(
             f"{path.name}: missing columns {missing or [_COORDINATES_PREFIX]}"
@@ -93,34 +126,54 @@ def read_counts_csv(path: Path) -> pl.DataFrame:
 
     raw = (
         frame.select(
-            *(pl.col(source).alias(target) for source, target in _COLUMNS.items()),
+            *(pl.col(names[source]).alias(target) for source, target in _COLUMNS.items()),
             pl.col(coordinates).alias("coordinates"),
         )
         .filter(pl.col("counter_id").is_not_null() & (pl.col("counter_id") != ""))
         .collect()
     )
-    lat_lon = pl.col("coordinates").str.split(", ")
-    result = raw.select(
-        "counter_id",
-        "site_id",
-        lat_lon.list.get(0, null_on_oob=True).cast(pl.Float64, strict=False).alias("lat"),
-        lat_lon.list.get(1, null_on_oob=True).cast(pl.Float64, strict=False).alias("lon"),
-        pl.col("time")
-        .str.to_datetime(_TIME_FORMAT, strict=False)
-        .dt.convert_time_zone("UTC")
-        .dt.cast_time_unit("us")
-        .alias("hour_start"),
-        # Thousands separators (a non-breaking space) and anything else that
-        # is not a digit are dropped before the conversion.
-        pl.col("count").str.replace_all(r"[^0-9]", "").cast(pl.Int32, strict=False).alias("count"),
+    lat_lon = pl.col("coordinates").str.split(",")
+    # "1 022" (any non-breaking or broken space) and "12.0": keep digits and
+    # the decimal point, then require a whole number.
+    count = pl.col("count").str.replace_all(r"[^0-9.]", "").cast(pl.Float64, strict=False)
+    parsed = raw.with_columns(
+        lat=lat_lon.list.get(0, null_on_oob=True).str.strip_chars().cast(pl.Float64, strict=False),
+        lon=lat_lon.list.get(1, null_on_oob=True).str.strip_chars().cast(pl.Float64, strict=False),
+        hour_start=_hour_start(pl.col("time"), pl.col("counter_id")),
+        count_value=count,
     )
-    bad_times = result["hour_start"].null_count()
-    bad_counts = result["count"].null_count() - raw["count"].null_count()
-    if bad_times or bad_counts:
+    # Only a local time without offset may legitimately fail (the skipped hour).
+    naive = pl.col("time").str.contains(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+    bad_times = parsed.filter(pl.col("hour_start").is_null() & ~naive.fill_null(value=False))
+    bad_counts = parsed.filter(
+        pl.col("count").is_not_null()
+        & (pl.col("count_value").is_null() | (pl.col("count_value") % 1 != 0))
+    )
+    if bad_times.height or bad_counts.height:
         raise CountersFormatError(
-            f"{path.name}: {bad_times} unreadable timestamps, {bad_counts} unreadable counts"
+            f"{path.name}: {bad_times.height} unreadable timestamps, "
+            f"{bad_counts.height} unreadable counts"
         )
-    return result.sort("counter_id", "hour_start")
+    skipped = parsed["hour_start"].null_count()
+    if skipped:
+        logger.warning("%s: %d rows on the hour skipped by the clock change", path.name, skipped)
+    rows = parsed.filter(pl.col("hour_start").is_not_null())
+    # On the day clocks go forward, 2018 and 2019 list the same hour twice for
+    # every counter, once with a count of 0: the real count is the larger one.
+    duplicates = rows.height - rows.select(pl.struct("counter_id", "hour_start").n_unique()).item()
+    if duplicates:
+        logger.warning("%s: %d duplicated hours, the larger count is kept", path.name, duplicates)
+    return (
+        rows.group_by("counter_id", "hour_start")
+        .agg(
+            pl.col("site_id").first(),
+            pl.col("lat").first(),
+            pl.col("lon").first(),
+            pl.col("count_value").max().cast(pl.Int32).alias("count"),
+        )
+        .select(list(COUNTS_SCHEMA))
+        .sort("counter_id", "hour_start")
+    )
 
 
 def yearly_files(content: bytes) -> dict[int, str]:
@@ -156,7 +209,12 @@ def convert_zip(zip_path: Path, out_path: Path) -> int:
         Number of rows written.
     """
     with zipfile.ZipFile(zip_path) as archive:
-        members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+        # macOS adds "__MACOSX/._<name>" metadata entries to some years.
+        members = [
+            name
+            for name in archive.namelist()
+            if name.lower().endswith(".csv") and not name.startswith("__MACOSX/")
+        ]
         if len(members) != 1:
             raise CountersFormatError(f"{zip_path.name}: expected one CSV, found {members}")
         with tempfile.TemporaryDirectory(dir=zip_path.parent) as workdir:

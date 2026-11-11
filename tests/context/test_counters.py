@@ -70,6 +70,73 @@ def test_unreadable_timestamp_is_refused(tmp_path: Path) -> None:
         read_counts_csv(write_csv(tmp_path / "bad.csv", rows))
 
 
+SEMICOLON_HEADER = HEADER.replace('"', "").replace(",", ";")
+
+
+def test_older_format_semicolons_utf8_bom_offsets_and_decimals(tmp_path: Path) -> None:
+    # 2018-2023: ";" separator, UTF-8 (2023 with a byte order mark), ISO
+    # timestamps with offset, counts written "12.0", coordinates "lat,lon".
+    rows = [
+        "100047547-104047547;6 rue Julia Bartet NE-SO;100047547;6 rue Julia Bartet;"
+        "12.0;2018-11-29T01:00:00+01:00;2018-11-28;https://x.jpg;48.82648,2.303149",
+    ]
+    path = tmp_path / "2023.csv"
+    path.write_bytes(("\ufeff" + "\n".join([SEMICOLON_HEADER, *rows]) + "\n").encode("utf-8"))
+
+    [row] = read_counts_csv(path).rows(named=True)
+
+    assert row["count"] == 12
+    assert row["hour_start"] == datetime(2018, 11, 29, 0, tzinfo=UTC)
+    assert (row["lat"], row["lon"]) == (48.82648, 2.303149)
+
+
+def test_local_times_without_offset_follow_paris_clock_changes(tmp_path: Path) -> None:
+    # 2016, 2017, 2021, 2022: local time, no offset. 26 March 2017 02:00 does
+    # not exist in Paris (clocks jump to 03:00); 29 October 02:00 exists twice.
+    rows = [
+        f"1-SC;n;1;n;{count};{time};;https://x.jpg;48.8,2.3"
+        for count, time in [
+            (5, "2017-03-26T01:00:00"),
+            (0, "2017-03-26T02:00:00"),
+            (7, "2017-03-26T03:00:00"),
+            (9, "2017-10-29T02:00:00"),
+        ]
+    ]
+    path = tmp_path / "2017.csv"
+    path.write_bytes(("\n".join([SEMICOLON_HEADER, *rows]) + "\n").encode("utf-8"))
+
+    frame = read_counts_csv(path)
+
+    assert frame["hour_start"].to_list() == [
+        datetime(2017, 3, 26, 0, tzinfo=UTC),
+        datetime(2017, 3, 26, 1, tzinfo=UTC),
+        datetime(2017, 10, 29, 0, tzinfo=UTC),  # the first 02:00
+    ]
+    assert frame["count"].to_list() == [5, 7, 9]
+
+
+def test_duplicated_hour_keeps_the_larger_count(tmp_path: Path) -> None:
+    # 2018-2019: on the day clocks go forward, the hour is listed twice per
+    # counter, once with 0.
+    rows = [
+        "1-SC;n;1;n;0;2018-03-25T03:00:00+02:00;;https://x.jpg;48.8,2.3",
+        "1-SC;n;1;n;6;2018-03-25T03:00:00+02:00;;https://x.jpg;48.8,2.3",
+    ]
+    path = tmp_path / "2018.csv"
+    path.write_bytes(("\n".join([SEMICOLON_HEADER, *rows]) + "\n").encode("utf-8"))
+
+    assert read_counts_csv(path)["count"].to_list() == [6]
+
+
+def test_fractional_count_is_refused(tmp_path: Path) -> None:
+    rows = ["1-SC;n;1;n;2.5;2018-03-25T03:00:00+02:00;;https://x.jpg;48.8,2.3"]
+    path = tmp_path / "bad.csv"
+    path.write_bytes(("\n".join([SEMICOLON_HEADER, *rows]) + "\n").encode("utf-8"))
+
+    with pytest.raises(CountersFormatError, match="1 unreadable counts"):
+        read_counts_csv(path)
+
+
 LISTING = {
     "attachments": [
         {
@@ -103,6 +170,8 @@ def test_unexpected_listing() -> None:
 def make_zip(path: Path, csv_path: Path) -> bytes:
     with zipfile.ZipFile(path, "w") as archive:
         archive.write(csv_path, "2025-comptage-velo-donnees-compteurs.csv")
+        # Some years ship macOS metadata next to the CSV.
+        archive.writestr("__MACOSX/._2025-comptage-velo-donnees-compteurs.csv", b"junk")
     return path.read_bytes()
 
 
