@@ -167,6 +167,7 @@ class GradientBoosting:
         self.sums: pl.DataFrame | None = None
         self.capacity: pl.DataFrame | None = None
         self.models: dict[int, _HorizonModels] = {}
+        self.trained_examples: dict[int, int] = {}
 
     def _matrix(
         self, examples: pl.DataFrame, history: pl.DataFrame, *, training: bool
@@ -195,6 +196,7 @@ class GradientBoosting:
         )
         examples = data.examples()
         self.models = {}
+        self.trained_examples = {}
         for horizon in HORIZONS_MIN:
             subset = examples.filter(pl.col("horizon_min") == horizon)
             if subset.height > self.max_rows:
@@ -246,7 +248,25 @@ class GradientBoosting:
                 else:
                     models.calibrators[event] = None
             self.models[horizon] = models
+            self.trained_examples[horizon] = subset.height
             logger.info("%s: horizon %d trained on %d examples", self.name, horizon, subset.height)
+
+    def compact(self) -> None:
+        """Keep only what forecasting needs: profile totals, not daily sums.
+
+        Daily sums serve the leave-one-day-out profile of training; forecasts
+        use totals. One row per station, type of day and slot instead of one
+        per day keeps a saved model small whatever the length of the history.
+        """
+        if self.sums is None:
+            raise RuntimeError("fit must be called before compact")
+        names = ["count", *[s for s, _ in _profile_names()]]
+        self.sums = (
+            self.sums.group_by(PROFILE_KEYS)
+            .agg([pl.col(name).sum() for name in names])
+            .with_columns(day=pl.lit(None, dtype=pl.Date))
+            .select(self.sums.columns)
+        )
 
     def predict(self, history: pl.DataFrame, examples: pl.DataFrame) -> pl.DataFrame:
         """Forecast counts and event probabilities of ``examples``."""

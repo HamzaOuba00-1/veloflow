@@ -77,3 +77,14 @@ def synthetic_status() -> pl.DataFrame:
         rows.append((t, t, 1, k % 5, 0, 10 - k % 5, True, True, True, t))
         rows.append((t, t, 2, 1 + k % 3, k % 2, (k + 1) % 4, True, True, True, t))
     return with_operational(pl.DataFrame(rows, schema=STATUS_SCHEMA, orient="row"))
+
+
+@pytest.fixture
+def silver_dir(synthetic_status: pl.DataFrame, tmp_path: Path) -> Path:
+    """A data folder holding ``synthetic_status`` as silver files, one per UTC day."""
+    frame = synthetic_status.drop("operational").with_columns(day=pl.col("fetched_at").dt.date())
+    for (day,), part in frame.group_by("day"):
+        folder = tmp_path / "silver" / "station_status" / f"date={day}"
+        folder.mkdir(parents=True)
+        part.drop("day").write_parquet(folder / "station_status.parquet")
+    return tmp_path
