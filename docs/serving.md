@@ -79,3 +79,28 @@ measured at deployment.
 
 Counts are rounded to one decimal, probabilities to three; intervals are the
 80 % intervals of the model.
+
+## API
+
+```powershell
+$env:VELOFLOW_FORECASTS = "data/serving/forecasts.json"   # or the public URL of the bucket object
+uv run veloflow-api                                         # http://localhost:8000/docs
+```
+
+`veloflow.serving.api` (FastAPI) serves the document, reloaded at most once a
+minute; if a reload fails it keeps serving the previous document, and answers
+503 only when it has never read one. Every request is a lookup or a sort over
+about 1,500 stations.
+
+| Endpoint | Requirement | Answer |
+|---|---|---|
+| `GET /health` | | origin and age of the forecasts (`stale` after 30 minutes), model in service |
+| `GET /stations`, `GET /stations/{id}` | F5 | state and forecasts of every station, or one (404 if none) |
+| `GET /critical?event=empty&horizon=60&limit=20` | F3 | stations most likely to be empty (or `full`), most likely first |
+| `GET /recommend?lat=&lon=&need=bike&horizon=15&radius_m=500` | F2 | nearby stations by distance with the chance to find a bike (`1 - P(empty)`) or a dock (`1 - P(full)`); whether to go to the nearest; the nearest station with at least 80 % |
+
+The horizon of `/recommend` is the time it takes to get there: someone 15
+minutes away should read the 15-minute forecast.
+
+On the document of 10 November 23:55 (1,486 stations), each answer takes 10
+to 70 ms with the in-process test client.
