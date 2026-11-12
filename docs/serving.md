@@ -104,3 +104,32 @@ minutes away should read the 15-minute forecast.
 
 On the document of 10 November 23:55 (1,486 stations), each answer takes 10
 to 70 ms with the in-process test client.
+
+## App
+
+```powershell
+$env:VELOFLOW_FORECASTS = "data/serving/forecasts.json"
+uv run veloflow-app                                         # http://localhost:8501
+```
+
+`veloflow.serving.app` (Streamlit) reads the same document as the API and
+asks it the same questions (`veloflow.serving.queries`), so both always
+agree. The sidebar sets what one is looking for (a bike or a dock) and when
+(15, 30 or 60 minutes); four tabs follow:
+
+| Tab | Requirement | Content |
+|---|---|---|
+| Map | F1 | every station, coloured by the chance to find a bike or a dock: green from 80 %, orange from 50 %, red below |
+| Go now? | F2 | from a station (Châtelet by default), within a walking distance: go to the nearest, or the nearest station with at least 80 % |
+| Critical stations | F3 | the 20 stations most likely to be empty (or full) |
+| Station | F4 | state now, forecasts with their 80 % intervals, probabilities of empty and full |
+
+Probabilities are shown as "> 99%" or "< 1%" at the extremes, never 100 %
+or 0 %: no forecast is certain, and a calibrated probability of 0.000 is a
+rounding, not a promise. The page warns when the forecasts are more than 30
+minutes old.
+
+Streamlit is in the `app` dependency group: installed on the laptop, in CI
+and in the app's container, not on the collector VM. On the document of 10
+November (1,486 stations) the page renders in 0.6 seconds in Streamlit's
+headless test runner.

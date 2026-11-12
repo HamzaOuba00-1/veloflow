@@ -9,7 +9,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from veloflow.serving.api import ForecastStore, create_app, distance_m, read_source
+from veloflow.serving.api import ForecastStore, create_app, read_source
+from veloflow.serving.queries import distance_m
 
 
 def forecast(p_empty: float, p_full: float) -> dict[str, Any]:

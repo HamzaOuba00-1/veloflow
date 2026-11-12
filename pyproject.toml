@@ -35,6 +35,7 @@ veloflow-backtest = "veloflow.evaluation.report:main"
 veloflow-train = "veloflow.models.train:main"
 veloflow-predict = "veloflow.serving.live:main"
 veloflow-api = "veloflow.serving.api:main"
+veloflow-app = "veloflow.serving.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -83,9 +84,9 @@ strict = true
 warn_unreachable = true
 files = ["src", "tests", "scripts"]
 
-# scikit-learn ships no type information.
+# scikit-learn and pydeck ship no type information.
 [[tool.mypy.overrides]]
-module = ["sklearn.*"]
+module = ["sklearn.*", "pydeck.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -109,7 +110,15 @@ branch = true
 show_missing = true
 fail_under = 80
 
+# Installed by `uv sync` and `uv run` on the laptop and in CI; the collector VM
+# installs none of them (`uv sync --no-default-groups`).
+[tool.uv]
+default-groups = ["dev", "app"]
+
 [dependency-groups]
+app = [
+    "streamlit>=1.50",
+]
 dev = [
     "httpx2>=2.16.0",
     "matplotlib>=3.11.2",

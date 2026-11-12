@@ -26,12 +26,18 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from veloflow.serving.queries import (
+    best_option,
+    freshness,
+    options_near,
+)
+from veloflow.serving.queries import (
+    critical as rank_critical,
+)
+
 SOURCE_ENV = "VELOFLOW_FORECASTS"
 DEFAULT_SOURCE = "data/serving/forecasts.json"
 TTL_S = 60.0
-# Forecasts older than this are flagged: the VM job runs every 10 minutes.
-STALE_AFTER_S = 30 * 60
-EARTH_RADIUS_M = 6_371_000.0
 Horizon = Literal["15", "30", "60"]
 
 
@@ -112,14 +118,6 @@ class Recommendation(BaseModel):
     options: list[Option]
 
 
-def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in metres (haversine)."""
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = p2 - p1, math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
-
-
 def read_source(source: str) -> dict[str, Any]:
     """The forecast document at a local path or an ``http(s)`` URL."""
     if source.startswith(("http://", "https://")):
@@ -180,10 +178,9 @@ def create_app(store: ForecastStore) -> FastAPI:
     def health() -> Health:
         """Age of the forecasts in service; ``stale`` after 30 minutes."""
         document = store.document()
-        generated = datetime.fromisoformat(document["generated_at"])
-        age = (datetime.now(UTC) - generated).total_seconds()
+        status, age = freshness(document, datetime.now(UTC))
         return Health(
-            status="stale" if age > STALE_AFTER_S else "ok",
+            status=status,
             origin=document["origin"],
             generated_at=document["generated_at"],
             age_seconds=round(age, 1),
@@ -212,14 +209,6 @@ def create_app(store: ForecastStore) -> FastAPI:
         min_probability: Annotated[float, Query(ge=0.0, le=1.0)] = 0.0,
     ) -> list[Critical]:
         """Stations most likely to be empty (or full) at the horizon."""
-        ranked = sorted(
-            (
-                (s["forecasts"][horizon][f"p_{event}"], s)
-                for s in store.stations()
-                if horizon in s["forecasts"]
-            ),
-            key=lambda pair: (-pair[0], pair[1]["station_id"]),
-        )
         return [
             Critical(
                 station_id=s["station_id"],
@@ -229,9 +218,8 @@ def create_app(store: ForecastStore) -> FastAPI:
                 probability=p,
                 now=Counts(**s["now"]),
             )
-            for p, s in ranked
-            if p >= min_probability
-        ][:limit]
+            for p, s in rank_critical(store.stations(), event, horizon, limit, min_probability)
+        ]
 
     @app.get("/recommend")
     def recommend(
@@ -248,31 +236,25 @@ def create_app(store: ForecastStore) -> FastAPI:
         ``1 - P(full)`` for a dock at the horizon (the time to walk there).
         ``best`` is the nearest station with at least ``min_probability``.
         """
-        event = "empty" if need == "bike" else "full"
-        options = sorted(
-            (
-                Option(
-                    station_id=s["station_id"],
-                    name=s["name"],
-                    distance_m=round(distance_m(lat, lon, s["lat"], s["lon"]), 1),
-                    probability=round(1.0 - s["forecasts"][horizon][f"p_{event}"], 3),
-                    now=Counts(**s["now"]),
-                )
-                for s in store.stations()
-                if horizon in s["forecasts"]
-            ),
-            key=lambda option: option.distance_m,
-        )
-        nearby = [o for o in options if o.distance_m <= radius_m]
-        nearest = nearby[0] if nearby else None
-        best = next((o for o in nearby if o.probability >= min_probability), None)
+        options = [
+            Option(
+                station_id=o["station"]["station_id"],
+                name=o["station"]["name"],
+                distance_m=o["distance_m"],
+                probability=o["probability"],
+                now=Counts(**o["station"]["now"]),
+            )
+            for o in options_near(store.stations(), lat, lon, need, horizon, radius_m)
+        ]
+        nearest = options[0] if options else None
+        best = best_option([o.model_dump() for o in options], min_probability)
         return Recommendation(
             need=need,
             horizon=horizon,
             nearest=nearest,
             go_to_nearest=nearest is not None and nearest.probability >= min_probability,
-            best=best,
-            options=nearby,
+            best=Option(**best) if best else None,
+            options=options,
         )
 
     return app
