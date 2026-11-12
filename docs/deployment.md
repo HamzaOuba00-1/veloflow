@@ -18,6 +18,7 @@ described by files in this repository.
 | `infra/vm/veloflow-predict.service` | systemd one-shot job: forecast now, publish `forecasts.json` |
 | `infra/vm/veloflow-predict.timer` | Runs it every 10 minutes (minutes 2, 12, 22…) |
 | `infra/gcp/create_forecast_bucket.ps1` | Creates the public bucket and the VM's service account (run from the laptop) |
+| `Dockerfile`, `infra/gcp/deploy_cloud_run.ps1` | Image of the API and the app, built by Cloud Build and deployed on Cloud Run |
 
 ## VM settings and why
 
@@ -45,7 +46,7 @@ described by files in this repository.
 All services run as the `veloflow` system user (no shell, no sudo), can write
 only to `/var/lib/veloflow`, and have a memory cap (300 MB for the collector,
 450 MB for the compaction, 150 MB for the weather snapshot, 450 MB for the
-forecast until measured). The VM installs the runtime dependencies only
+forecast: measured peak 360 MB, 25 s and 16 s of CPU for 1,496 stations). The VM installs the runtime dependencies only
 (`uv sync --no-default-groups`): neither the development tools nor Streamlit.
 
 ## First deployment and updates
@@ -122,6 +123,31 @@ Until a model is there, the job is skipped (`ConditionPathExists`), not failed.
 Free-tier budget: 4,320 uploads a month (class A operations, 5,000 free) and
 one read a minute per running API or app instance (class B, 50,000 free);
 storage is one object of about 140 KB.
+
+## API and app on Cloud Run
+
+One image (`Dockerfile`) serves both: the API by default, the app with the
+command `veloflow-app`. It holds the code and its runtime dependencies (plus
+Streamlit), no model, no data and no credentials: both services read the
+public document. Built by Cloud Build from the sources, so the laptop needs no
+Docker:
+
+```powershell
+.\infra\gcp\deploy_cloud_run.ps1 -WhatIf
+.\infra\gcp\deploy_cloud_run.ps1
+```
+
+| Setting | API | App | Reason |
+|---|---|---|---|
+| Region | us-east1 | us-east1 | Same as the bucket: no inter-region traffic |
+| Memory | 512 MiB | 1 GiB | Streamlit, pandas and pyarrow need more than FastAPI |
+| Instances | 0 to 1 | 0 to 1 | Free tier: nothing runs without visitors; the first visit after a quiet period waits for a cold start |
+| Access | public | public | The data is open; no account needed |
+| Other | | session affinity, 1 h timeout | A Streamlit session is a WebSocket held by one instance |
+
+Artifact Registry keeps the last two images (`infra/gcp/registry_cleanup.json`):
+0.5 GB is free and the image weighs a few hundred MB. CI builds the image on
+every push and checks that both services start.
 
 ## Getting the data on the laptop
 

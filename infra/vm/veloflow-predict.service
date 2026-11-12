@@ -31,6 +31,6 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/veloflow
-# Cap before measurement on the VM (see docs/deployment.md); the collector
-# and the system must keep their share of the 1 GB.
+# Measured peak on the VM (12 Nov 2026, 1,496 stations): 360 MB, in 25 s
+# (16 s of CPU). The cap leaves 25 % of margin and the collector its share.
 MemoryMax=450M

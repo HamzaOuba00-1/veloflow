@@ -1,0 +1,11 @@
+# Files uploaded to Cloud Build by `gcloud run deploy --source .`: the same as
+# the Docker build context (see .dockerignore). Never the data or the venv.
+*
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+**/__pycache__
