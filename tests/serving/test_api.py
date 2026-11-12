@@ -6,11 +6,16 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from veloflow.serving.api import ForecastStore, create_app, read_source
+from veloflow.serving.api import create_app
 from veloflow.serving.queries import distance_m
+from veloflow.serving.source import (
+    ForecastStore,
+    ForecastsUnavailableError,
+    check_document,
+    read_source,
+)
 
 
 def forecast(p_empty: float, p_full: float) -> dict[str, Any]:
@@ -142,20 +147,26 @@ def test_store_reloads_after_ttl_and_survives_failures() -> None:
     assert len(calls) == 1  # cached
     now[0] = 61
     assert store.document()["origin"]  # refresh failed: previous document served
+    assert store.last_error == "bucket unreachable"
     now[0] = 62
     store.document()
+    assert len(calls) == 2  # the failure is not retried on every request
+    now[0] = 122
+    store.document()
     assert len(calls) == 3
+    assert store.last_error is None
 
 
 def test_no_document_at_all_is_a_503() -> None:
     def failing(_: str) -> dict[str, Any]:
         raise OSError("missing")
 
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(ForecastsUnavailableError, match="missing"):
         ForecastStore("x", reader=failing).document()
-    assert error.value.status_code == 503
     app = create_app(ForecastStore("x", reader=failing))
-    assert TestClient(app).get("/health").status_code == 503
+    response = TestClient(app).get("/health")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "forecasts unavailable: missing"
 
 
 def test_read_source_from_a_file_and_a_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,3 +184,40 @@ def test_read_source_from_a_file_and_a_url(tmp_path: Path, monkeypatch: pytest.M
 def test_distance() -> None:
     # 0.001 degree of latitude is about 111 m.
     assert distance_m(48.0, 2.0, 48.001, 2.0) == pytest.approx(111.2, abs=0.2)
+
+
+@pytest.mark.parametrize(
+    ("broken", "message"),
+    [
+        ([], "not a JSON object"),
+        ({"stations": []}, "no generated_at, origin, model"),
+        ({**document(datetime.now(UTC)), "origin": "yesterday"}, "isoformat"),
+        ({**document(datetime.now(UTC)), "stations": []}, "no station"),
+        ({**document(datetime.now(UTC)), "stations": [{"name": "x"}]}, "incomplete"),
+        (
+            {
+                **document(datetime.now(UTC)),
+                "stations": [{**station(1, 48.8, 2.3, 0, 0), "forecasts": {}}],
+            },
+            "station 1 has no forecast",
+        ),
+    ],
+)
+def test_a_broken_document_is_refused(broken: Any, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        check_document(broken)
+    store = ForecastStore("x", reader=lambda _: broken)
+    with pytest.raises(ForecastsUnavailableError):
+        store.document()
+
+
+def test_a_broken_update_keeps_the_last_good_document() -> None:
+    good = document(datetime.now(UTC))
+    served = [good, {"stations": []}]
+    now = [0.0]
+    store = ForecastStore("x", ttl=60, reader=lambda _: served.pop(0), clock=lambda: now[0])
+
+    assert store.document() is good
+    now[0] = 61
+    assert store.document() is good
+    assert store.last_error is not None

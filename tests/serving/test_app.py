@@ -146,3 +146,42 @@ def test_missing_forecasts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     page = AppTest.from_file(APP, default_timeout=30).run()
 
     assert "unavailable" in page.error[0].value
+
+
+def run_on(document: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
+    path = tmp_path / "forecasts.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setenv("VELOFLOW_FORECASTS", str(path))
+    return AppTest.from_file(APP, default_timeout=30).run()
+
+
+@pytest.mark.parametrize("name", ["Go now", "Station", "Map"])
+def test_a_station_gone_from_the_document(page: AppTest, name: str) -> None:
+    """The chosen station left the feed between two updates: back to a known one."""
+    page.session_state["station"] = "Closed since the last update"
+    page.sidebar.radio[0].set_value(name).run()
+
+    assert not page.exception
+    assert page.session_state["station"] in {"Châtelet", "Bastille"}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [{"stations": []}, {"origin": "2026-11-12T08:00:00+00:00"}, [], {"stations": "x"}],
+    ids=["no-station", "no-stations-key", "not-an-object", "stations-not-a-list"],
+)
+def test_an_unusable_document_is_said_not_raised(
+    document: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = run_on(document, tmp_path, monkeypatch)
+
+    assert not page.exception
+    assert "unavailable" in page.error[0].value
+
+
+def test_an_unreachable_url_is_said_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VELOFLOW_FORECASTS", "http://127.0.0.1:9/forecasts.json")
+    page = AppTest.from_file(APP, default_timeout=30).run()
+
+    assert not page.exception
+    assert "unavailable" in page.error[0].value

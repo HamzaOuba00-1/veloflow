@@ -89,9 +89,25 @@ uv run veloflow-api                                         # http://localhost:8
 ```
 
 `veloflow.serving.api` (FastAPI) serves the document, reloaded at most once a
-minute; if a reload fails it keeps serving the previous document, and answers
-503 only when it has never read one. Every request is a lookup or a sort over
-about 1,500 stations.
+minute. Every request is a lookup or a sort over about 1,500 stations.
+
+The API and the app read the document through the same
+`veloflow.serving.source.ForecastStore`:
+
+- every document read is checked first (`check_document`): a JSON object with
+  `generated_at`, `origin` (ISO dates), `model` and a non-empty list of
+  stations, each with its id, name, position, current counts and at least one
+  forecast. A document that fails is refused like an unreadable one;
+- a failed reload (file missing or half written, bucket unreachable, broken
+  document) keeps the last good document in service, so the forecasts only
+  look older (`stale` after 30 minutes); the source is tried again once a
+  minute, not on every request, since each try may wait for a timeout;
+- with no good document at all, the API answers 503 and the app shows a
+  message, never a stack trace.
+
+In the app, a station chosen earlier that is no longer in the document (closed
+or removed between two updates) is replaced by the station nearest the centre
+of Paris.
 
 | Endpoint | Requirement | Answer |
 |---|---|---|

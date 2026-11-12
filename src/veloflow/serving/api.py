@@ -13,17 +13,12 @@ Endpoints (OpenAPI documentation at ``/docs``):
 * ``GET /recommend``: near a point, where to find a bike or a dock (F2).
 """
 
-import json
-import math
 import os
-import time
-from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from veloflow.serving.queries import (
@@ -34,10 +29,13 @@ from veloflow.serving.queries import (
 from veloflow.serving.queries import (
     critical as rank_critical,
 )
+from veloflow.serving.source import (
+    DEFAULT_SOURCE,
+    SOURCE_ENV,
+    ForecastStore,
+    ForecastsUnavailableError,
+)
 
-SOURCE_ENV = "VELOFLOW_FORECASTS"
-DEFAULT_SOURCE = "data/serving/forecasts.json"
-TTL_S = 60.0
 Horizon = Literal["15", "30", "60"]
 
 
@@ -118,54 +116,6 @@ class Recommendation(BaseModel):
     options: list[Option]
 
 
-def read_source(source: str) -> dict[str, Any]:
-    """The forecast document at a local path or an ``http(s)`` URL."""
-    if source.startswith(("http://", "https://")):
-        response = httpx.get(source, timeout=10.0)
-        response.raise_for_status()
-        loaded: dict[str, Any] = response.json()
-        return loaded
-    document: dict[str, Any] = json.loads(Path(source).read_text(encoding="utf-8"))
-    return document
-
-
-class ForecastStore:
-    """The current document, reloaded at most once per ``ttl`` seconds."""
-
-    def __init__(
-        self,
-        source: str,
-        ttl: float = TTL_S,
-        reader: Callable[[str], dict[str, Any]] = read_source,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        """Remember where to read; nothing is read before the first request."""
-        self.source, self.ttl, self.reader, self.clock = source, ttl, reader, clock
-        self._document: dict[str, Any] | None = None
-        self._loaded_at = -math.inf
-
-    def document(self) -> dict[str, Any]:
-        """The cached document, refreshed when older than ``ttl``.
-
-        A failed refresh keeps serving the previous document; with none, the
-        error becomes a 503.
-        """
-        if self.clock() - self._loaded_at >= self.ttl:
-            try:
-                self._document = self.reader(self.source)
-                self._loaded_at = self.clock()
-            except (OSError, ValueError, httpx.HTTPError) as error:
-                if self._document is None:
-                    raise HTTPException(503, f"forecasts unavailable: {error}") from error
-        assert self._document is not None
-        return self._document
-
-    def stations(self) -> list[dict[str, Any]]:
-        """Stations of the current document."""
-        stations: list[dict[str, Any]] = self.document()["stations"]
-        return stations
-
-
 def create_app(store: ForecastStore) -> FastAPI:
     """The FastAPI application over a forecast store."""
     app = FastAPI(
@@ -173,6 +123,11 @@ def create_app(store: ForecastStore) -> FastAPI:
         version="0.1.0",
         description="Forecasts of Vélib' Métropole bikes and docks at 15, 30 and 60 minutes.",
     )
+
+    @app.exception_handler(ForecastsUnavailableError)
+    async def unavailable(_: Request, error: ForecastsUnavailableError) -> JSONResponse:
+        """No usable document yet: 503, so that clients retry later."""
+        return JSONResponse(status_code=503, content={"detail": f"forecasts unavailable: {error}"})
 
     @app.get("/health")
     def health() -> Health:

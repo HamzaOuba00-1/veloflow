@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from veloflow.serving.api import DEFAULT_SOURCE, SOURCE_ENV, read_source
 from veloflow.serving.queries import (
     NEED_EVENT,
     Need,
@@ -27,6 +26,12 @@ from veloflow.serving.queries import (
     critical,
     freshness,
     options_near,
+)
+from veloflow.serving.source import (
+    DEFAULT_SOURCE,
+    SOURCE_ENV,
+    ForecastStore,
+    ForecastsUnavailableError,
 )
 from veloflow.serving.ui import (
     ACCENT,
@@ -546,13 +551,15 @@ def render() -> None:
     )
     st.html(CSS)
 
-    @st.cache_data(ttl=60, show_spinner=False)
-    def load(source: str) -> dict[str, Any]:
-        return read_source(source)
+    @st.cache_resource(show_spinner=False)
+    def store(source: str) -> ForecastStore:
+        # One store per server, shared by every visitor: the document is
+        # read at most once a minute and the last good one is kept.
+        return ForecastStore(source)
 
     try:
-        document = load(os.environ.get(SOURCE_ENV, DEFAULT_SOURCE))
-    except (OSError, ValueError) as error:
+        document = store(os.environ.get(SOURCE_ENV, DEFAULT_SOURCE)).document()
+    except ForecastsUnavailableError as error:
         st.error(f"Forecasts are unavailable right now ({error}).")
         return
     stations: list[dict[str, Any]] = document["stations"]
@@ -561,7 +568,13 @@ def render() -> None:
     names = list(by_name)
     by_id = {s["station_id"]: s for s in stations}
     state = st.session_state
-    state.setdefault("station", names[nearest_index(names, by_name, *CENTRE)] if names else None)
+    # The checked document has stations; the one chosen earlier may have left
+    # the feed since (closed, removed): back to the station nearest the centre.
+    if state.get("station") not in by_name:
+        state["station"] = names[nearest_index(names, by_name, *CENTRE)]
+    for key in ("here", "station_pick"):  # station pickers remember their choice
+        if key in state and state[key] not in by_name:
+            del state[key]
     state.setdefault("page", "Map")
 
     # Sidebar: brand, navigation, freshness.
