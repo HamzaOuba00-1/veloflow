@@ -8,8 +8,8 @@ Requirements covered: F1 (map of every station with its forecast), F2 ("go
 now?" with alternatives), F3 (stations most at risk), F4 (station page with
 intervals and probabilities).
 
-Layout: a dark sidebar with the navigation, a search bar and the freshness of
-the data on top, then one page per task. Figures and cards come from
+Layout: a dark sidebar with the navigation and the freshness of the data, then
+one page per task. Figures and cards come from
 ``serving.ui`` (pure functions); this module only arranges them.
 """
 
@@ -30,16 +30,19 @@ from veloflow.serving.queries import (
 )
 from veloflow.serving.ui import (
     ACCENT,
+    ASSETS,
     CENTRE,
     COUNT_COLOURS,
-    DASH,
     GOOD,
-    HORIZONS,
+    WALK_M_PER_MIN,
+    about_html,
+    band_labels,
     brand_html,
     chance,
     count_cards_html,
     directions_url,
     horizon_table_html,
+    horizons,
     icon,
     insight,
     kpi_html,
@@ -58,10 +61,11 @@ from veloflow.serving.ui import (
     risk_table_html,
     sidebar_status_html,
     smart_tip,
+    stale_chip_html,
     station_head_html,
     station_trend,
     tip_html,
-    topbar_html,
+    walk_minutes,
 )
 
 PAGES = {
@@ -72,7 +76,8 @@ PAGES = {
     "About": ":material/info:",
 }
 NEEDS: dict[str, Need] = {"Bike": "bike", "Dock": "dock"}
-WALKS = {"5 min": 400, "10 min": 800, "15 min": 1200}
+WALK_LIMITS_MIN = (5, 10, 15)  # walking-time choices; distances follow from WALK_M_PER_MIN
+TOP_AT_RISK = 20  # stations listed on the At risk page
 
 THEME = {
     "base": "light",
@@ -97,26 +102,50 @@ html, body, .stApp, .stApp p, .stApp label, .stApp input, .stApp button, .stApp 
   font-family: "Material Symbols Rounded" !important; }
 .stApp { background: radial-gradient(1200px 500px at 85% -10%, #ece9ff 0%, transparent 60%),
   var(--vf-bg); }
-header[data-testid="stHeader"] { background: transparent; }
+header[data-testid="stHeader"], header[data-testid="stHeader"] [data-testid="stToolbar"] {
+  background: transparent; pointer-events: none; }
+header[data-testid="stHeader"] button { pointer-events: auto; }
 #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stToolbarActions"],
 [data-testid="stMainMenu"], [data-testid="stAppDeployButton"] { display: none !important; }
-[data-testid="stExpandSidebarButton"] { background: #fff; border-radius: 12px;
+[data-testid="stExpandSidebarButton"] { background: #15143a; border-radius: 10px;
   box-shadow: var(--vf-shadow); width: 2.5rem; height: 2.5rem; }
+[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"] { color: #fff; }
+[data-testid="stExpandSidebarButton"]:hover { background: #2a2766; }
 .block-container { max-width: 1440px; padding: 1.25rem 2rem 3rem; }
 
 /* Sidebar */
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #0f1023 0%, #15143a 55%,
-  #2a1f4d 80%, #6b3f6b 93%, #d9825b 100%); border-right: 0; }
+[data-testid="stSidebar"] { background: linear-gradient(180deg, #0f1023 0%, #15143a 45%,
+  #1f1940 75%, #120f2a 100%); border-right: 0; }
 [data-testid="stSidebar"] * { color: #e2e8f0; }
-[data-testid="stSidebarHeader"] { height: .5rem; min-height: 0; }
-.vf-brand { display: flex; flex-direction: column; align-items: center; gap: .35rem;
-  padding: .5rem 0 1.75rem; }
+/* Header row of the sidebar: room for the collapse button, always shown
+   (Streamlit only reveals it on hover). */
+[data-testid="stSidebarHeader"] { height: 3.25rem; min-height: 0; padding: .75rem .9rem 0;
+  justify-content: flex-end; align-items: center; }
+[data-testid="stSidebarCollapseButton"] { display: block !important;
+  visibility: visible !important; opacity: 1 !important; }
+[data-testid="stSidebarCollapseButton"] button { width: 2.25rem; height: 2.25rem;
+  border-radius: 10px; background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .14); transition: background .2s var(--vf-ease); }
+[data-testid="stSidebarCollapseButton"] button:hover { background: rgba(255, 255, 255, .14); }
+[data-testid="stSidebarCollapseButton"] button:focus-visible { outline: 2px solid #a5b4fc;
+  outline-offset: 2px; }
+[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { color: #fff !important;
+  font-size: 1.25rem; }
+.vf-brand { display: flex; flex-direction: column; align-items: center; gap: .2rem;
+  padding: .25rem 0 1.75rem; }
+.vf-logo { width: 116px; height: auto; margin-bottom: .2rem;
+  filter: drop-shadow(0 6px 18px rgba(99, 102, 241, .35)); }
 .vf-brand-name { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; color: #fff; }
 .vf-brand-sub { font-size: .8rem; color: #cbd5e1; }
+/* Navigation: every item, and its selection, spans the sidebar's width. */
+[data-testid="stSidebar"] [data-testid="stRadio"],
+[data-testid="stSidebar"] [data-testid="stRadio"] > div,
+[data-testid="stSidebar"] [data-testid="stRadioGroup"] { width: 100% !important; }
 [data-testid="stSidebar"] div[role="radiogroup"] { display: flex; flex-direction: column;
-  gap: .25rem; }
-[data-testid="stSidebar"] [data-testid="stRadioOption"] { padding: .7rem .9rem;
-  border-radius: 12px;
+  gap: .3rem; width: 100%; }
+[data-testid="stSidebar"] div[role="radiogroup"] > div { width: 100%; }
+[data-testid="stSidebar"] [data-testid="stRadioOption"] { display: flex; width: 100%;
+  box-sizing: border-box; padding: .75rem 1rem; border-radius: 10px;
   margin: 0 !important; transition: background .2s var(--vf-ease); }
 [data-testid="stSidebar"] [data-testid="stRadioOption"] > div > div:first-child { display:
   none !important; }
@@ -129,27 +158,64 @@ header[data-testid="stHeader"] { background: transparent; }
   box-shadow: inset 3px 0 0 #a5b4fc; }
 [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] p { color: #fff
   !important; }
-.vf-side-live { display: flex; gap: .6rem; align-items: center; margin-top: 2rem;
-  padding: .8rem 1rem;
+/* The scene sits at the very bottom of the sidebar: the sidebar's content
+   column stretches to the window's height and the scene takes the space
+   left below the navigation (margin-top: auto). On a short window it simply
+   follows the navigation. */
+[data-testid="stSidebarContent"] { display: flex; flex-direction: column; }
+[data-testid="stSidebarUserContent"] { flex: 1 0 auto; display: flex; flex-direction: column;
+  padding-bottom: 0 !important; }
+[data-testid="stSidebarUserContent"] > div { flex: 1 0 auto; display: flex;
+  flex-direction: column; }
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] { flex: 1 0 auto; }
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.vf-side-scene) {
+  margin-top: auto; }
+.vf-side-scene { position: relative; margin: 1rem -30px 0; }
+.vf-side-scene img { display: block; width: 100%; height: 17rem; object-fit: cover;
+  object-position: center bottom;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 40%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 40%); }
+.vf-side-live { position: absolute; left: 1.25rem; right: 1.25rem; bottom: 1.5rem;
+  display: flex; gap: .6rem; align-items: center; padding: .8rem 1rem;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border-radius: 14px; background: rgba(15, 16, 35, .55);
   border: 1px solid rgba(255, 255, 255, .12); }
 .vf-side-live b { display: block; color: #fff; font-size: .9rem; }
 .vf-side-live small { color: #cbd5e1; font-size: .75rem; }
 
 /* Top bar */
-.vf-live { display: flex; gap: .6rem; align-items: center; justify-content: flex-end;
-  padding-top: .35rem; }
-.vf-live b { display: block; font-size: .875rem; color: var(--vf-text); }
-.vf-live small { color: var(--vf-muted); font-size: .75rem; }
 .vf-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #22c55e; flex: none;
   animation: vf-pulse 2.4s ease-in-out infinite; }
 .stale .vf-dot { background: #f59e0b; animation: none; }
+.vf-side-live.stale { border-color: rgba(245, 158, 11, .45); }
+/* Late forecasts: said by the sidebar card; on phones, where the sidebar is
+   folded, by a small chip at the top of the page instead. */
+.vf-stale-chip { display: inline-flex; gap: .45rem; align-items: center;
+  padding: .3rem .7rem; border-radius: 999px; background: #fff7e6; color: #92400e;
+  border: 1px solid #fcd9a5; font-size: .8rem; font-weight: 600; }
+.vf-stale-chip .vf-dot { background: #f59e0b; animation: none; width: .5rem; height: .5rem; }
+[data-testid="stElementContainer"]:has(.vf-stale-chip) { display: none; }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div { border-radius: 14px !important;
   border: 1px solid var(--vf-line) !important; background: rgba(255, 255, 255, .85);
   min-height: 2.75rem; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
 
 /* Page heads */
-.vf-page-head { margin: 1rem 0 1.25rem; animation: vf-in .35s var(--vf-ease) both; }
+.vf-page-head { position: relative; margin: .25rem 0 1.25rem; padding: 2.5rem 0 2.25rem;
+  min-height: 12rem; animation: vf-in .35s var(--vf-ease) both; }
+.vf-page-head > :not(.vf-hero) { position: relative; z-index: 1; }
+.vf-hero { position: absolute; top: -1.25rem; right: -2rem; bottom: 0; width: 72%;
+  height: calc(100% + 1.25rem); object-fit: cover; object-position: right top;
+  border-radius: 0 0 0 28px; pointer-events: none;
+  /* The photo is darker than the old drawing: it fades in further right,
+     so the title and its line of text stay on a light background; it
+     fades out on the right too, after the tower. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent 22%, #000 62%,
+      #000 90%, transparent 100%),
+    linear-gradient(0deg, transparent 0, #000 22%);
+  -webkit-mask-composite: source-in; mask-composite: intersect;
+  mask-image: linear-gradient(90deg, transparent 0, transparent 22%, #000 62%,
+      #000 90%, transparent 100%),
+    linear-gradient(0deg, transparent 0, #000 22%); }
 .vf-chip-accent { display: inline-flex; gap: .35rem; align-items: center;
   padding: .25rem .65rem;
   border-radius: 999px; background: #eef0ff; color: var(--vf-accent); font-size: .8rem;
@@ -292,6 +358,7 @@ header[data-testid="stHeader"] { background: transparent; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after {
   animation: none !important; transition: none !important; } }
 @media (max-width: 760px) {
+  [data-testid="stElementContainer"]:has(.vf-stale-chip) { display: block; }
   .block-container { padding: 3.75rem .9rem 2.5rem; }
   .vf-page-title h1 { font-size: 1.6rem; }
   .vf-page-icon { width: 2.8rem; height: 2.8rem; }
@@ -299,7 +366,14 @@ header[data-testid="stHeader"] { background: transparent; }
   .vf-counts { gap: .5rem; }
   .vf-count { padding: .7rem; }
   .vf-count-value { font-size: 1.5rem; }
-  .vf-live { justify-content: flex-start; }
+  .vf-hero { width: 100%; right: -.9rem; top: -3.75rem; height: calc(100% + 3.75rem);
+    opacity: .5;
+    -webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 80%, #000 90%,
+        transparent 100%),
+      linear-gradient(0deg, transparent 0, #000 22%);
+    mask-image: linear-gradient(90deg, transparent 35%, #000 80%, #000 90%,
+        transparent 100%),
+      linear-gradient(0deg, transparent 0, #000 22%); }
 }
 </style>
 """
@@ -466,7 +540,7 @@ def render() -> None:
 
     st.set_page_config(
         page_title="VéloFlow · Vélib' forecasts",
-        page_icon="🚲",
+        page_icon=str(ASSETS / "favicon.png"),
         layout="wide",
         initial_sidebar_state="auto",
     )
@@ -490,12 +564,6 @@ def render() -> None:
     state.setdefault("station", names[nearest_index(names, by_name, *CENTRE)] if names else None)
     state.setdefault("page", "Map")
 
-    def open_station() -> None:
-        if state.get("search"):
-            state["station"] = state["search"]
-            state["page"] = "Station"
-            state["search"] = None
-
     # Sidebar: brand, navigation, freshness.
     with st.sidebar:
         st.html(brand_html())
@@ -504,27 +572,17 @@ def render() -> None:
             list(PAGES),
             key="page",
             label_visibility="collapsed",
+            width="stretch",  # each item, and the selection, spans the sidebar
             format_func=lambda p: f"{PAGES[p]}  {p}",
         )
-        st.html(sidebar_status_html(document, status))
+        st.html(sidebar_status_html(document, status, age))
 
-    # Top bar: station search and freshness.
-    search, live = st.columns([4, 1], vertical_alignment="center")
-    search.selectbox(
-        "Search a station",
-        names,
-        index=None,
-        key="search",
-        on_change=open_station,
-        placeholder="Search a station (e.g. Bastille, République...)",
-        label_visibility="collapsed",
-    )
-    live.html(topbar_html(document, status, age))
-    if status == "stale":
-        st.warning(f"These forecasts are {age / 60:.0f} minutes old: the feed may be late.")
+    if status == "stale":  # the sidebar card says it on wide screens
+        st.html(stale_chip_html(age))
 
     page = state["page"]
     summary = network_summary(stations)
+    steps = horizons(stations)  # forecast horizons of this document, shortest first
 
     if page == "Map":
         st.html(
@@ -538,7 +596,7 @@ def render() -> None:
         controls = st.columns([1, 1.2, 3])
         need = NEEDS[controls[0].radio("Looking for", list(NEEDS), horizontal=True, key="map_need")]
         horizon = controls[1].radio(
-            "In", HORIZONS, horizontal=True, key="map_h", format_func=lambda h: f"{h} min"
+            "In", steps, horizontal=True, key="map_h", format_func=lambda h: f"{h} min"
         )
         st.html(
             '<div class="vf-kpis">'
@@ -562,7 +620,7 @@ def render() -> None:
                 selection_mode="single-object",
             )
             label = "bike" if need == "bike" else "dock"
-            st.html(legend_html((f"80%+ chance of a {label}", f"50{DASH}80%", "Under 50%")))
+            st.html(legend_html(band_labels(f" of a {label}")))
             picked = (event.selection.objects.get("stations") or []) if event else []
             if picked and picked[0]["station_id"] in by_id:
                 chosen = by_id[picked[0]["station_id"]]["name"]
@@ -579,9 +637,13 @@ def render() -> None:
                     + risk_cards_html(selected, horizon)
                     + "</div>"
                 )
-                if st.button("Open station page", width="stretch"):
-                    state["page"] = "Station"
-                    st.rerun()
+                # A callback: it runs before the navigation radio (key "page") is
+                # drawn, the only moment Streamlit lets the page change.
+                st.button(
+                    "Open station page",
+                    width="stretch",
+                    on_click=lambda: state.update(page="Station"),
+                )
         st.html('<div style="height:1rem"></div>')
         chart, figures, tip = st.columns([1.5, 1.2, 1], gap="medium", vertical_alignment="center")
         with chart:
@@ -618,21 +680,31 @@ def render() -> None:
                     key="go_need",
                 )
             ]
-            walk = st.radio("Walking time", list(WALKS), horizontal=True, key="walk")
-            options = options_near(stations, here["lat"], here["lon"], need, "15", WALKS[walk])
+            walk = st.radio(
+                "Walking time",
+                WALK_LIMITS_MIN,
+                horizontal=True,
+                key="walk",
+                format_func=lambda m: f"{m} min",
+            )
+            # The forecast nearest to the walking time: the station as you reach it.
+            go_h = min(steps, key=lambda h: abs(int(h) - walk))
+            options = options_near(
+                stations, here["lat"], here["lon"], need, go_h, walk * WALK_M_PER_MIN
+            )
             st.html(options_html(options, need))
             st.html(
                 tip_html(
                     "Tip",
-                    "Green stations are the safest bets. The chance is for 15 "
-                    "minutes from now: about the time to walk there.",
+                    f"Green stations are the safest bets. Chances are for {go_h} minutes "
+                    f"from now, the forecast nearest to your {walk}-minute walk.",
                 )
             )
         best = best_option(options, GOOD) or (options[0] if options else None)
         with middle:
             st.pydeck_chart(
                 _deck(
-                    map_points(stations, need, "15"),
+                    map_points(stations, need, go_h),
                     centre=(here["lat"], here["lon"]),
                     zoom=14.2,
                     highlight=best["station"] if best else None,
@@ -640,24 +712,24 @@ def render() -> None:
                 ),
                 height=560,
             )
-            st.html(legend_html(("80%+ chance", f"50{DASH}80%", "Under 50%")))
+            st.html(legend_html(band_labels()))
         with card:
             if best is None:
                 st.html(tip_html("No station in reach", "Widen the walking time.", "fair"))
             else:
                 station = best["station"]
-                minutes = max(1, round(best["distance_m"] / 80))
+                minutes = walk_minutes(best["distance_m"])
                 st.html(
                     '<div class="vf-card">'
                     + station_head_html(
                         station, f" · {best['distance_m']:.0f} m · ~{minutes} min walk"
                     )
-                    + f'<div class="vf-section-title">{percent(chance(station, need, "15"))} '
-                    f"chance of a {'bike' if need == 'bike' else 'dock'} in 15 min</div>"
+                    + f'<div class="vf-section-title">{percent(chance(station, need, go_h))} '
+                    f"chance of a {'bike' if need == 'bike' else 'dock'} in {go_h} min</div>"
                     + now_compact_html(station)
                     + '<div style="height:.75rem"></div>'
                     + horizon_table_html(station)
-                    + risk_cards_html(station, "15")
+                    + risk_cards_html(station, go_h)
                     + "</div>"
                 )
                 st.link_button(
@@ -674,21 +746,20 @@ def render() -> None:
             controls[0].radio("Looking for", list(NEEDS), horizontal=True, key="risk_need")
         ]
         horizon = controls[1].radio(
-            "In", HORIZONS, horizontal=True, key="risk_h", format_func=lambda h: f"{h} min"
+            "In", steps, horizontal=True, key="risk_h", format_func=lambda h: f"{h} min"
         )
         event_name = NEED_EVENT[need]
-        ranked = critical(stations, event_name, horizon, limit=20)
+        ranked = critical(stations, event_name, horizon, limit=TOP_AT_RISK)
         head.html(
             page_head_html(
                 "alert",
                 "At risk",
-                f"The 20 stations most likely to be {event_name} in {horizon} minutes.",
+                f"The {len(ranked)} stations most likely to be {event_name} in {horizon} minutes.",
             )
         )
         average = sum(p for p, _ in ranked) / len(ranked) if ranked else 0.0
         st.html(
             '<div class="vf-kpis">'
-            + kpi_html("alert", "#ef4444", str(len(ranked)), "At-risk stations listed")
             + kpi_html("clock", "#8b5cf6", f"{horizon} min", "Forecast horizon")
             + kpi_html("pie", "#a855f7", percent(average), f"Average P({event_name})")
             + "</div>"
@@ -726,7 +797,7 @@ def render() -> None:
         with map_column:
             st.pydeck_chart(
                 _deck(
-                    map_points(stations, "bike", "15"),
+                    map_points(stations, "bike", steps[0]),
                     centre=(station["lat"], station["lon"]),
                     zoom=14.6,
                     highlight=station,
@@ -737,7 +808,7 @@ def render() -> None:
         with forecast:
             horizon = st.radio(
                 "Forecast",
-                HORIZONS,
+                steps,
                 horizontal=True,
                 key="station_h",
                 format_func=lambda h: f"{h} min",
@@ -770,23 +841,7 @@ def render() -> None:
                 "info", "About VéloFlow", "How the forecasts are made, and what they are worth."
             )
         )
-        st.html(
-            '<div class="vf-card vf-about"><p>VéloFlow forecasts, for every Vélib\' Métropole '
-            "station, the number of mechanical bikes, e-bikes and free docks 15, 30 and 60 minutes "
-            "ahead, and the probability that the station will be empty or full.</p>"
-            "<h3>Data</h3><p>The public Vélib' feed, collected every 30 seconds since 8 November "
-            "2026 and cleaned by explicit quality rules (stale versions, closed stations, frozen "
-            "feed); Open-Meteo weather forecasts; the French school calendar.</p>"
-            "<h3>Model</h3><p>A global LightGBM model per horizon, trained on every station at "
-            "once: it forecasts the change from now, and calibrated probabilities of empty and "
-            "full. Every model is evaluated by the same backtest, which fails if a forecast reads "
-            "data from after its own time.</p>"
-            '<h3>Honesty</h3><p>With a short history, the model matches the simple "nothing '
-            'changes" forecast on counts, and is clearly better at ranking the stations about to '
-            "run empty. The numbers are re-measured as the history grows.</p>"
-            '<p><a href="https://github.com/HamzaOuba00-1/veloflow">Source code and evaluation '
-            "on GitHub</a></p></div>"
-        )
+        st.html(about_html(document))
 
     st.html(
         '<p class="vf-muted" style="font-size:.8rem;margin-top:2.5rem">Data: Vélib\' Métropole '

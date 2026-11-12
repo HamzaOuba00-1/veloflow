@@ -179,6 +179,7 @@ def test_predict_command_writes_the_document(served: Path) -> None:
     document = json.loads(out.read_text(encoding="utf-8"))
     assert document["origin"] == "2026-11-12T08:00:00+00:00"
     assert document["model"]["name"] == "lightgbm"
+    assert {"data_start", "data_end", "examples", "interval_level"} <= set(document["model"])
     station = document["stations"][0]
     assert set(station) == {
         "station_id",

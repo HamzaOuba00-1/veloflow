@@ -59,7 +59,8 @@ measured at deployment.
 {
   "generated_at": "2026-11-12T08:03:30+00:00",
   "origin": "2026-11-12T08:00:00+00:00",
-  "model": {"name": "lightgbm", "trained_at": "...", "data_end": "..."},
+  "model": {"name": "lightgbm", "trained_at": "...", "data_start": "...", "data_end": "...",
+            "examples": 1234567, "package_version": "...", "interval_level": 0.8},
   "stations": [
     {
       "station_id": 6245, "code": "1116", "name": "Ventadour - Opéra",
@@ -114,8 +115,9 @@ uv run veloflow-app                                         # http://localhost:8
 
 `veloflow.serving.app` (Streamlit) reads the same document as the API and
 asks it the same questions (`veloflow.serving.queries`), so both always
-agree. A dark sidebar holds the navigation and the freshness of the data; a
-search bar on top opens any station's page.
+agree. A dark sidebar holds the logo, the navigation and the freshness of the
+data. A station's page opens from the map (select a dot, then "Open station
+page") or from the picker on the Station page.
 
 | Page | Requirement | Content |
 |---|---|---|
@@ -123,7 +125,19 @@ search bar on top opens any station's page.
 | Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state and forecasts, and walking directions |
 | At risk | F3 | the 20 stations most likely to be empty (or full), with their district, and the same stations on the map |
 | Station | F4 | state now with the change expected in 15 minutes, a map centred on the station, counts with their 80 % interval and risks of empty and full at 15, 30 or 60 minutes, the trend of each count, and a one-line reading of the risks |
-| About | | what the forecasts are, the data, the model, and what they are worth today |
+| About | | what the forecasts are, the data and the model, every figure read from the document (stations, horizons, training window and examples, interval level); accuracy is left to the evaluation report, so no measured figure goes stale in the app |
+
+### No figure written by hand
+
+Every number the app shows is computed: from the forecast document (counts,
+probabilities, horizons, number of stations, the model card) or from a named
+constant of `veloflow.serving.ui` (`GOOD` and `FAIR` thresholds of the colour
+bands, `WATCH` for risks worth showing, `WALK_M_PER_MIN` to turn metres into
+walking minutes). Legends, page subtitles and tips are written from them, so a
+model with other horizons or another interval level changes the texts too. On
+Go now, the chance shown is the forecast horizon nearest to the walking time
+chosen. A document from an older `veloflow-predict` without the full model
+card still renders: missing facts are left out, not guessed.
 
 ### Design
 
@@ -133,9 +147,25 @@ system fonts, line icons (inline SVG carried as `data:` images, since
 Streamlit's HTML sanitiser drops `<svg>` elements), probabilities with a thin
 bar and a colour, and "> 99%" or "< 1%" at the extremes, never 100 % or 0 %.
 
+The logo (a cyclist, white on transparent) and the favicon (the same logo
+on navy) come from the project's own design. Behind each page title and at
+the bottom of the sidebar, two AI-generated pictures of the Eiffel Tower at
+dusk, as an unlit silhouette, provided by Hamza Ouba. `scripts/assets/build_photos.py` crops and
+compresses them from their sources (kept out of Git in `data/assets_src/`);
+sources are listed in `src/veloflow/serving/assets/CREDITS.md`. Pictures are inlined
+as `data:` URIs by `asset_uri`, so they are kept small (hero about 1,800 px
+wide); a photo wins over the drawing of the same name (`hero.svg`,
+`sidebar.svg`), which remain as a fallback.
+
+The sidebar shows its collapse button at all times (Streamlit reveals it only
+on hover), in a header row of its own; each page in the navigation, and the
+selection, spans the sidebar's full width. Streamlit's header is transparent
+but sits above the page: it lets clicks through, except on its buttons.
+
 Some elements of the mockups were left out on purpose, because no data
 supports them: an "overall accuracy" figure (none is measured; the map page
-shows the share of stations with a bike instead), photos of the stations, a
+shows the share of stations with a bike instead), photos of the stations (no
+licensed source covers 1,486 stations), a
 waiting time, favourites, and a dark mode. Locating the user and searching by
 address need the browser's geolocation or a geocoding service; the app
 searches by station for now.

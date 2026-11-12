@@ -3,22 +3,29 @@
 Figures are computed from a forecast document; cards are HTML strings.
 
 Pure functions, tested without a browser. Every text that comes from the feed
-(station names) is escaped. Icons are inline SVG in one line style, so the
-app needs no icon font and no image.
+(station names) is escaped. Icons are SVG in one line style, so the app needs
+no icon font. The logo and the Paris scenes are original drawings bundled in
+``assets/``; a photo dropped next to a drawing with the same name (for example
+``assets/hero.jpg``) replaces it.
 """
 
 import base64
 from datetime import datetime
+from functools import lru_cache
 from html import escape
+from importlib.resources import files
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from veloflow.serving.queries import NEED_EVENT, Need, distance_m
 
 PARIS = ZoneInfo("Europe/Paris")
-HORIZONS = ("15", "30", "60")
 CENTRE = (48.8584, 2.3470)  # Châtelet
-GOOD, FAIR = 0.8, 0.5
+# Thresholds and assumptions; every figure shown is computed from them or
+# from the forecast document, never written in a text.
+GOOD, FAIR = 0.8, 0.5  # chance of success: good from GOOD, fair from FAIR
+WATCH = 0.2  # a risk of empty or full is worth showing from WATCH
+WALK_M_PER_MIN = 80  # walking speed (4.8 km/h) to turn distances into minutes
 DASH = "\u2013"  # en dash, for ranges
 # Status colours (map, chances) and the accent of the interface.
 GREEN, ORANGE, RED = [34, 197, 94, 235], [245, 158, 11, 235], [239, 68, 68, 235]
@@ -30,6 +37,14 @@ COUNTS = (
     ("ebike", "E-bikes", "zap"),
     ("docks", "Free docks", "dock"),
 )
+ASSETS = files("veloflow.serving") / "assets"
+MIME = {
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+}
 COUNT_COLOURS = {"mechanical": "#4f6bed", "ebike": "#8b5cf6", "docks": "#16a34a"}
 
 _PATHS = {
@@ -76,6 +91,28 @@ def icon(name: str, size: int = 20, colour: str = "#475569") -> str:
 # --- Figures --------------------------------------------------------------
 
 
+def horizons(stations: list[dict[str, Any]]) -> list[str]:
+    """Forecast horizons present in the document, in minutes, shortest first."""
+    found = {h for s in stations for h in s["forecasts"]}
+    return sorted(found, key=int)
+
+
+def station_horizons(station: dict[str, Any]) -> list[str]:
+    """Forecast horizons of one station, shortest first."""
+    return sorted(station["forecasts"], key=int)
+
+
+def walk_minutes(distance: float) -> int:
+    """Walking time in whole minutes (at least one) at ``WALK_M_PER_MIN``."""
+    return max(1, round(distance / WALK_M_PER_MIN))
+
+
+def band_labels(suffix: str = "") -> tuple[str, str, str]:
+    """Legend of the three chance colours, written from ``GOOD`` and ``FAIR``."""
+    good, fair = round(GOOD * 100), round(FAIR * 100)
+    return (f"{good}%+ chance{suffix}", f"{fair}{DASH}{good}%", f"Under {fair}%")
+
+
 def percent(probability: float) -> str:
     """A probability for people: never "100 %" or "0 %", which no forecast is."""
     if probability >= 0.995:
@@ -86,7 +123,7 @@ def percent(probability: float) -> str:
 
 
 def tone(probability: float) -> str:
-    """``good`` from 80 %, ``fair`` from 50 %, ``poor`` below."""
+    """``good`` from ``GOOD``, ``fair`` from ``FAIR``, ``poor`` below."""
     if probability >= GOOD:
         return "good"
     return "fair" if probability >= FAIR else "poor"
@@ -98,10 +135,10 @@ def colour(probability: float) -> list[int]:
 
 
 def risk_colour(probability: float) -> str:
-    """Colour of a risk (empty or full): red from 50 %, orange from 20 %, grey below."""
+    """Colour of a risk (empty or full): red from ``FAIR``, orange from ``WATCH``, else grey."""
     if probability >= FAIR:
         return TONES["poor"]
-    return TONES["fair"] if probability >= 0.2 else NEUTRAL
+    return TONES["fair"] if probability >= WATCH else NEUTRAL
 
 
 def district(code: str | None) -> str:
@@ -141,7 +178,7 @@ def network_trend(stations: list[dict[str, Any]]) -> list[tuple[str, float]]:
     if not stations:
         return []
     points = [("Now", network_summary(stations)["with_bike"])]
-    for horizon in HORIZONS:
+    for horizon in horizons(stations):
         chances = [chance(s, "bike", horizon) for s in stations if horizon in s["forecasts"]]
         if chances:
             points.append((f"{horizon} min", sum(chances) / len(chances)))
@@ -152,9 +189,7 @@ def station_trend(station: dict[str, Any], count: str) -> list[tuple[str, float]
     """A count now, then forecast at each horizon."""
     points = [("Now", float(station["now"][count]))]
     points += [
-        (f"{h} min", float(station["forecasts"][h][count]))
-        for h in HORIZONS
-        if h in station["forecasts"]
+        (f"{h} min", float(station["forecasts"][h][count])) for h in station_horizons(station)
     ]
     return points
 
@@ -183,7 +218,7 @@ def insight(station: dict[str, Any], horizon: str) -> tuple[str, str]:
         return f"High risk of no bike in {horizon} minutes ({percent(empty)}).", "poor"
     if full >= FAIR:
         return f"High risk of no free dock in {horizon} minutes ({percent(full)}).", "poor"
-    if max(empty, full) >= 0.2:
+    if max(empty, full) >= WATCH:
         what = "empty" if empty >= full else "full"
         return (
             f"Some risk of the station being {what} in {horizon} minutes "
@@ -241,47 +276,75 @@ def _bar(value: float, fill: str) -> str:
     return f'<div class="vf-bar"><span style="width:{width:.1f}%;background:{fill}"></span></div>'
 
 
-def topbar_html(document: dict[str, Any], status: str, age_s: float) -> str:
-    """Live (or delayed) pill with the time of the data."""
+@lru_cache
+def asset_uri(stem: str) -> str:
+    """Data URI of a bundled picture: a photo of that name wins over the drawing.
+
+    Pictures are inlined because Streamlit's HTML sanitiser keeps ``data:``
+    images but strips inline SVG, and the app then serves no static files.
+    """
+    for suffix, mime in MIME.items():
+        resource = ASSETS / f"{stem}{suffix}"
+        if resource.is_file():
+            encoded = base64.b64encode(resource.read_bytes()).decode()
+            return f"data:{mime};base64,{encoded}"
+    raise FileNotFoundError(f"no picture named {stem!r} in {ASSETS}")
+
+
+def age_text(age_s: float) -> str:
+    """How old the forecasts are, for people: ``45 min ago``, ``2 h ago``, ``2 h 05 ago``."""
+    minutes = max(0, round(age_s / 60))
+    if minutes < 60:
+        return f"{minutes} min ago"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} h ago" if rest == 0 else f"{hours} h {rest:02d} ago"
+
+
+def sidebar_status_html(document: dict[str, Any], status: str, age_s: float = 0.0) -> str:
+    """The live data card at the bottom of the sidebar, over the Paris scene.
+
+    Late forecasts turn it amber and say how old they are; no banner is
+    shown on the page (``stale_chip_html`` stands in on phones, where the
+    sidebar is folded).
+    """
     origin = datetime.fromisoformat(document["origin"]).astimezone(PARIS)
     stale = status == "stale"
-    label = "Delayed data" if stale else "Live data"
-    sub = f"{age_s / 60:.0f} min old" if stale else f"Updated {origin:%H:%M}"
+    when = f"Updated {origin:%H:%M}" + (f", {age_text(age_s)}" if stale else "")
     return (
-        f'<div class="vf-live {"stale" if stale else ""}"><span class="vf-dot"></span>'
-        f"<div><b>{label}</b><small>{sub}</small></div></div>"
+        f'<div class="vf-side-scene"><img src="{asset_uri("sidebar")}" alt="">'
+        f'<div class="vf-side-live {"stale" if stale else ""}"><span class="vf-dot"></span>'
+        f"<div><b>{'Delayed data' if stale else 'Live data'}</b>"
+        f"<small>{when}</small></div></div></div>"
     )
 
 
-def sidebar_status_html(document: dict[str, Any], status: str) -> str:
-    """The live data card at the bottom of the sidebar."""
-    origin = datetime.fromisoformat(document["origin"]).astimezone(PARIS)
-    stale = status == "stale"
+def stale_chip_html(age_s: float) -> str:
+    """A small "delayed data" chip for phones, where the sidebar card is hidden."""
     return (
-        f'<div class="vf-side-live {"stale" if stale else ""}"><span class="vf-dot"></span>'
-        f"<div><b>{'Delayed data' if stale else 'Live data'}</b>"
-        f"<small>Updated {origin:%H:%M}</small></div></div>"
+        f'<div class="vf-stale-chip"><span class="vf-dot"></span>Delayed data, '
+        f"updated {age_text(age_s)}</div>"
     )
 
 
 def brand_html() -> str:
     """Logo and name at the top of the sidebar."""
     return (
-        f'<div class="vf-brand">{icon("bike", 44, "#ffffff")}'
+        f'<div class="vf-brand"><img class="vf-logo" src="{asset_uri("logo")}" alt="">'
         '<div class="vf-brand-name">VéloFlow</div>'
         '<div class="vf-brand-sub">Smart Vélib\' forecasts</div></div>'
     )
 
 
 def page_head_html(icon_name: str, title: str, subtitle: str, eyebrow: str | None = None) -> str:
-    """Title block of a page."""
+    """Title block of a page, over the Paris skyline."""
     chip = (
         f'<span class="vf-chip-accent">{icon("pin", 14)} {escape(eyebrow)}</span>'
         if eyebrow
         else ""
     )
     return (
-        f'<div class="vf-page-head">{chip}<div class="vf-page-title"><span class="vf-page-icon">'
+        f'<div class="vf-page-head"><img class="vf-hero" src="{asset_uri("hero")}" alt="">'
+        f'{chip}<div class="vf-page-title"><span class="vf-page-icon">'
         f"{icon(icon_name, 30, ACCENT)}</span><div><h1>{escape(title)}</h1>"
         f"<p>{escape(subtitle)}</p></div></div></div>"
     )
@@ -339,16 +402,17 @@ def station_head_html(station: dict[str, Any], extra: str = "") -> str:
 
 
 def now_tiles_html(station: dict[str, Any]) -> str:
-    """What the station holds now, with the change expected in 15 minutes."""
+    """What the station holds now, with the change expected at the shortest horizon."""
+    first = station_horizons(station)[0] if station["forecasts"] else None
     tiles = []
     for key, label, icon_name in COUNTS:
         now = station["now"][key]
-        later = station["forecasts"].get("15", {}).get(key)
+        later = station["forecasts"][first].get(key) if first else None
         delta = ""
         if later is not None:
             change = round(later - now)
             arrow = "↑" if change > 0 else "↓" if change < 0 else "→"
-            delta = f'<div class="vf-kpi-note">{arrow} {change:+d} in 15 min</div>'
+            delta = f'<div class="vf-kpi-note">{arrow} {change:+d} in {first} min</div>'
         tiles.append(
             f'<div class="vf-card vf-kpi"><div class="vf-kpi-icon" style="background:'
             f'{COUNT_COLOURS[key]}1f">{icon(icon_name, 26, COUNT_COLOURS[key])}</div><div>'
@@ -371,16 +435,16 @@ def now_compact_html(station: dict[str, Any]) -> str:
 
 
 def horizon_table_html(station: dict[str, Any]) -> str:
-    """Mechanical / e-bikes / docks forecast at 15, 30 and 60 minutes."""
+    """Mechanical / e-bikes / docks forecast at every horizon of the station."""
+    hs = station_horizons(station)
     cells = "".join(
         f'<div class="vf-hcell"><div class="vf-hcell-h">{h} min</div><div class="vf-hcell-v">'
         f"{station['forecasts'][h]['mechanical']:.0f} / {station['forecasts'][h]['ebike']:.0f} / "
         f"{station['forecasts'][h]['docks']:.0f}</div></div>"
-        for h in HORIZONS
-        if h in station["forecasts"]
+        for h in hs
     )
     return (
-        f'<div class="vf-section-title">{icon("clock", 18)} Next 15 / 30 / 60 min '
+        f'<div class="vf-section-title">{icon("clock", 18)} Next {" / ".join(hs)} min '
         f'<small>mechanical / e-bikes / docks</small></div><div class="vf-hgrid">{cells}</div>'
     )
 
@@ -436,7 +500,7 @@ def options_html(options: list[dict[str, Any]], need: Need) -> str:
     thing = "bike" if need == "bike" else "dock"
     rows = "".join(
         f'<div class="vf-opt"><div><div class="vf-opt-name">{escape(o["station"]["name"])}</div>'
-        f"<small>{o['distance_m']:.0f} m · ~{max(1, round(o['distance_m'] / 80))} min walk</small>"
+        f"<small>{o['distance_m']:.0f} m · ~{walk_minutes(o['distance_m'])} min walk</small>"
         f'</div><span class="vf-badge" style="color:{TONES[tone(o["probability"])]};background:'
         f'{TONES[tone(o["probability"])]}1a">{percent(o["probability"])} {thing}</span></div>'
         for o in options[:8]
@@ -454,4 +518,53 @@ def legend_html(labels: tuple[str, str, str]) -> str:
             for c, label in zip(swatches, labels, strict=True)
         )
         + "</div>"
+    )
+
+
+def _when(stamp: Any) -> str:
+    """A UTC timestamp of the model card for people (``10 Nov 2026 23:59 UTC``)."""
+    moment = datetime.fromisoformat(str(stamp))
+    return f"{moment:%d %b %Y %H:%M} UTC"
+
+
+def _series(items: list[str]) -> str:
+    """``15, 30 and 60`` from a list of words."""
+    return items[0] if len(items) < 2 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def about_html(document: dict[str, Any]) -> str:
+    """The About card, every figure read from the forecast document.
+
+    Fields missing from older documents are left out rather than guessed.
+    """
+    stations = document["stations"]
+    card = document["model"]
+    span = f"up to {_when(card['data_end'])}"
+    if card.get("data_start"):
+        span = f"from {_when(card['data_start'])} to {_when(card['data_end'])}"
+    examples = f" on {card['examples']:,} examples" if card.get("examples") else ""
+    interval = (
+        f" Each count comes with a {card['interval_level']:.0%} prediction interval "
+        "(split conformal), shown as its likely range."
+        if card.get("interval_level")
+        else ""
+    )
+    return (
+        '<div class="vf-card vf-about"><p>VéloFlow forecasts, for each of the '
+        f"{len(stations):,} Vélib' Métropole stations of this update, the number of mechanical "
+        f"bikes, e-bikes and free docks {_series(horizons(stations))} minutes ahead, and the "
+        "probability that the station will be empty or full.</p>"
+        "<h3>Data</h3><p>The public Vélib' feed, cleaned by explicit quality rules (stale "
+        "versions, closed stations, frozen feed); Open-Meteo weather forecasts; the French "
+        f"school calendar. The model in use was trained{examples} {span}.</p>"
+        f"<h3>Model</h3><p>The model <code>{escape(str(card['name']))}</code> is one global "
+        "model per horizon, trained on every station at once. It forecasts the change from "
+        f"now, and calibrated probabilities of empty and full.{interval} Every model is "
+        "evaluated by the same backtest, which fails if a forecast reads data from after "
+        "its own time.</p>"
+        "<h3>Accuracy</h3><p>Measured by that backtest against simple baselines, and re-run "
+        "as the history grows; the figures are in the evaluation report, not repeated here "
+        "so that they never go stale.</p>"
+        '<p><a href="https://github.com/HamzaOuba00-1/veloflow">Source code and evaluation '
+        "on GitHub</a></p></div>"
     )

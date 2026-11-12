@@ -1,10 +1,12 @@
 """Tests for the building blocks of the web app (figures and HTML cards)."""
 
 import base64
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from veloflow.serving import ui
 from veloflow.serving.ui import (
     DASH,
     GREEN,
@@ -12,6 +14,10 @@ from veloflow.serving.ui import (
     ORANGE,
     RED,
     TONES,
+    about_html,
+    age_text,
+    asset_uri,
+    band_labels,
     brand_html,
     chance,
     colour,
@@ -19,6 +25,7 @@ from veloflow.serving.ui import (
     directions_url,
     district,
     horizon_table_html,
+    horizons,
     icon,
     insight,
     kpi_html,
@@ -38,11 +45,12 @@ from veloflow.serving.ui import (
     risk_table_html,
     sidebar_status_html,
     smart_tip,
+    stale_chip_html,
     station_head_html,
     station_trend,
     tip_html,
     tone,
-    topbar_html,
+    walk_minutes,
 )
 
 
@@ -208,12 +216,23 @@ def test_cards_render_the_figures() -> None:
 def test_page_parts() -> None:
     document = {"origin": "2026-11-12T08:00:00+00:00", "stations": STATIONS}
 
-    assert "Live data" in topbar_html(document, "ok", 60)
-    assert "Updated 09:00" in topbar_html(document, "ok", 60)
-    assert "31 min old" in topbar_html(document, "stale", 31 * 60)
     assert "Delayed data" in sidebar_status_html(document, "stale")
+    late = sidebar_status_html(document, "stale", 2 * 3600 + 5 * 60)
+    assert "Updated 09:00, 2 h 05 ago" in late
+    assert "ago" not in sidebar_status_html(document, "ok", 60)
+    assert "updated 45 min ago" in stale_chip_html(45 * 60)
+    assert [age_text(s) for s in (20, 45 * 60, 2 * 3600, 2 * 3600 + 5 * 60)] == [
+        "0 min ago",
+        "45 min ago",
+        "2 h ago",
+        "2 h 05 ago",
+    ]
     assert "VéloFlow" in brand_html()
-    assert "Map" in page_head_html("map", "Title", "Subtitle", eyebrow="Map")
+    assert asset_uri("logo") in brand_html()
+    assert asset_uri("sidebar") in sidebar_status_html(document, "ok")
+    head = page_head_html("map", "Title", "Subtitle", eyebrow="Map")
+    assert "Map" in head
+    assert asset_uri("hero") in head
     assert "1,486" in kpi_html("bike", "#000000", "1,486", "Stations", note="today")
     assert "Bikes" in tip_html("Bikes", "text", "good")
     assert "12" in network_figures_html({"mechanical": 12, "ebike": 3, "docks": 7})
@@ -243,3 +262,62 @@ def test_names_from_the_feed_are_escaped() -> None:
     ):
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
+
+
+@pytest.mark.parametrize(
+    ("stem", "signature"),
+    [
+        ("logo", b"\x89PNG"),  # transparent PNG: wins over logo.svg
+        ("sidebar", b"\xff\xd8\xff"),  # photos (JPEG): win over the drawings
+        ("hero", b"\xff\xd8\xff"),
+    ],
+)
+def test_bundled_pictures_are_data_uris(stem: str, signature: bytes) -> None:
+    uri = asset_uri(stem)
+
+    assert uri.startswith("data:image/")
+    assert base64.b64decode(uri.split(",", 1)[1]).startswith(signature)
+
+
+def test_a_photo_replaces_the_drawing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "hero.svg").write_text("<svg/>")
+    (tmp_path / "hero.jpg").write_bytes(b"\xff\xd8photo")
+    monkeypatch.setattr(ui, "ASSETS", tmp_path)
+    asset_uri.cache_clear()
+    try:
+        uri = asset_uri("hero")
+        assert uri.startswith("data:image/jpeg;base64,")
+        assert base64.b64decode(uri.split(",", 1)[1]) == b"\xff\xd8photo"
+        with pytest.raises(FileNotFoundError, match="nothing"):
+            asset_uri("nothing")
+    finally:
+        asset_uri.cache_clear()
+
+
+def test_horizons_walks_and_bands_are_computed() -> None:
+    assert horizons(STATIONS) == ["15", "60"]
+    assert horizons([{"forecasts": {"60": {}, "5": {}}}, {"forecasts": {"20": {}}}]) == [
+        "5",
+        "20",
+        "60",
+    ]
+    assert walk_minutes(400) == 5
+    assert walk_minutes(10) == 1
+    assert band_labels(" of a bike") == ("80%+ chance of a bike", f"50{DASH}80%", "Under 50%")
+
+
+def test_about_reads_the_model_card() -> None:
+    old: dict[str, Any] = {
+        "stations": STATIONS,
+        "model": {"name": "lightgbm", "data_end": "2026-11-10T23:59:55"},
+    }
+    text = about_html(old)
+    assert "each of the 2 Vélib" in text
+    assert "15 and 60 minutes ahead" in text
+    assert "trained up to 10 Nov 2026 23:59 UTC" in text
+    assert "prediction interval" not in text  # not in the card: left out, not guessed
+
+    card = {**old["model"], "data_start": "2026-11-05T00:00:00", "examples": 1000}
+    full = about_html({"stations": STATIONS, "model": {**card, "interval_level": 0.8}})
+    assert "trained on 1,000 examples from 05 Nov 2026 00:00 UTC" in full
+    assert "80% prediction interval" in full

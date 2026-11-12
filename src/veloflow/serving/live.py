@@ -12,7 +12,7 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,7 @@ from veloflow.datasets import load_station_information, resample_status
 from veloflow.evaluation.examples import HORIZONS_MIN, TARGETS
 from veloflow.models.artifact import ModelCard, load_model
 from veloflow.models.base import INPUT_COLUMNS
-from veloflow.models.gbm import GradientBoosting
+from veloflow.models.gbm import INTERVAL_LEVEL, GradientBoosting
 from veloflow.quality.versions import select_versions, with_operational
 from veloflow.storage.compaction import STATUS_SCHEMA
 from veloflow.weather.grid import GRID
@@ -196,7 +196,8 @@ def to_document(
     return {
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "origin": origin.isoformat() if origin is not None else None,
-        "model": {"name": card.name, "trained_at": card.trained_at, "data_end": card.data_end},
+        # The whole model card, so that the app states facts it can show, not texts.
+        "model": {**asdict(card), "interval_level": INTERVAL_LEVEL},
         "stations": [
             {
                 "station_id": s["station_id"],

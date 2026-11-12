@@ -87,12 +87,57 @@ def test_at_risk_lists_the_riskiest_first(page: AppTest) -> None:
     assert html.index("Bastille") < html.index("Châtelet")
 
 
-def test_search_opens_the_station_page(page: AppTest) -> None:
-    page.selectbox(key="search").set_value("Bastille").run()
+def test_the_map_card_opens_the_station_page(page: AppTest) -> None:
+    page.sidebar.radio[0].set_value("Station").run()
+    page.selectbox[0].set_value("Bastille").run()
+    page.sidebar.radio[0].set_value("Map").run()
+
+    page.button[0].click().run()
 
     assert page.session_state["page"] == "Station"
     assert page.session_state["station"] == "Bastille"
     assert "High risk of no bike" in html_of(page)
+
+
+def test_no_search_bar(page: AppTest) -> None:
+    assert "search" not in page.session_state
+    assert all(box.key != "search" for box in page.selectbox)
+
+
+def test_figures_follow_the_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Horizons, counts and the model card come from the document, not from texts."""
+    forecast = station(1, "Châtelet", 48.8584, 0.05)["forecasts"]["15"]
+    stations = [station(i, name, 48.85 + i / 1000, 0.3) for i, name in enumerate("ABC")]
+    for s in stations:
+        s["forecasts"] = {"10": forecast, "20": forecast}
+    document = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "origin": "2026-11-12T08:00:00+00:00",
+        "model": {
+            "name": "lightgbm",
+            "trained_at": "2026-11-12T00:00:00+00:00",
+            "data_start": "2026-11-05T00:00:00+00:00",
+            "data_end": "2026-11-11T23:59:00+00:00",
+            "examples": 123456,
+            "interval_level": 0.9,
+        },
+        "stations": stations,
+    }
+    path = tmp_path / "forecasts.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setenv("VELOFLOW_FORECASTS", str(path))
+    page = AppTest.from_file(APP, default_timeout=30).run()
+
+    page.sidebar.radio[0].set_value("Go now").run()
+    assert "chance of a bike in 10 min" in html_of(page)
+    page.sidebar.radio[0].set_value("At risk").run()
+    assert "The 3 stations most likely to be empty in 10 minutes." in html_of(page)
+    page.sidebar.radio[0].set_value("About").run()
+    about = html_of(page)
+    assert "each of the 3 Vélib" in about
+    assert "10 and 20 minutes ahead" in about
+    assert "123,456 examples from 05 Nov 2026 00:00 UTC to 11 Nov 2026 23:59 UTC" in about
+    assert "90% prediction interval" in about
 
 
 def test_missing_forecasts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
