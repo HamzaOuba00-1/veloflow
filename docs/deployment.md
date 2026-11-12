@@ -39,7 +39,7 @@ described by files in this repository.
 | `/var/lib/veloflow/raw` | Raw archive (bronze): GBFS responses from the collector, weather forecasts from the hourly job |
 | `/var/lib/veloflow/silver` | Parquet files (silver), written by the nightly job |
 | `/var/lib/veloflow/quality` | Daily coverage reports (JSON), written by the nightly job |
-| `/var/lib/veloflow/models` | The model in service (`lightgbm.pkl`), copied from the laptop |
+| `/var/lib/veloflow/models` | The model in service (`lightgbm.pkl` and its card `lightgbm.json`), copied from the laptop |
 | `/var/lib/veloflow/serving` | The last forecast document, before its upload |
 
 All services run as the `veloflow` system user (no shell, no sudo), can write
@@ -109,11 +109,12 @@ metadata server, then a multipart upload. The object is stored gzipped (about
 copy cached by Google's edge for an hour. An upload replaces the object at
 once: readers see the old document or the new one, never half of one.
 
-After each training on the laptop, copy the model to the VM:
+After each training on the laptop, copy the model and its card (when, on what
+data, which version of the code; read with the model) to the VM:
 
 ```powershell
-gcloud compute scp data/models/lightgbm.pkl veloflow-collector:lightgbm.pkl
-gcloud compute ssh veloflow-collector --command="sudo install -o veloflow -g veloflow -m 644 lightgbm.pkl /var/lib/veloflow/models/ && rm lightgbm.pkl"
+gcloud compute scp data/models/lightgbm.pkl data/models/lightgbm.json veloflow-collector:.
+gcloud compute ssh veloflow-collector --command="sudo install -o veloflow -g veloflow -m 644 lightgbm.pkl lightgbm.json /var/lib/veloflow/models/ && rm lightgbm.pkl lightgbm.json"
 ```
 
 Until a model is there, the job is skipped (`ConditionPathExists`), not failed.
