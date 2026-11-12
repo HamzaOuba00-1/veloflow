@@ -57,6 +57,8 @@ if ! id -u "${APP_USER}" >/dev/null 2>&1; then
 fi
 # Open data, read by the sync job: readable by every local user, writable by the service only.
 install -d -o "${APP_USER}" -g "${APP_USER}" -m 755 "${DATA_DIR}"
+# The model (copied from the laptop) and the forecast document it writes.
+install -d -o "${APP_USER}" -g "${APP_USER}" -m 755 "${DATA_DIR}/models" "${DATA_DIR}/serving"
 
 as_app() { sudo -u "${APP_USER}" -H "$@"; }
 
@@ -70,16 +72,16 @@ else
 fi
 as_app git -C "${APP_DIR}" log -1 --format='Deployed commit: %h %s'
 
-log "Python 3.12 and runtime dependencies, exactly as locked (no dev tools)"
+log "Python 3.12 and runtime dependencies, exactly as locked (no dev tools, no web app)"
 # Explicit locations: the install must not depend on the user's home directory.
 as_app env UV_CACHE_DIR="${APP_HOME}/.cache/uv" UV_PYTHON_INSTALL_DIR="${APP_HOME}/python" \
-    uv sync --project "${APP_DIR}" --frozen --no-dev --quiet
+    uv sync --project "${APP_DIR}" --frozen --no-default-groups --quiet
 
 log "systemd units"
 install -m 644 "${APP_DIR}"/infra/vm/veloflow-*.service "${APP_DIR}"/infra/vm/veloflow-*.timer \
     /etc/systemd/system/
 systemctl daemon-reload
-TIMERS=(veloflow-compact.timer veloflow-weather.timer)
+TIMERS=(veloflow-compact.timer veloflow-weather.timer veloflow-predict.timer)
 systemctl enable --quiet veloflow-collector.service "${TIMERS[@]}"
 # restart, not start: on an update the running collector must load the new code.
 systemctl restart veloflow-collector.service

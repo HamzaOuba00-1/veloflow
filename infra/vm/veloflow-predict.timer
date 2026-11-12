@@ -1,0 +1,12 @@
+[Unit]
+Description=Forecast every station and publish the document every 10 minutes
+
+[Timer]
+# Minutes 2, 12, 22...: just after a collection, away from the weather job (minute 7).
+OnCalendar=*-*-* *:02/10:00 UTC
+AccuracySec=30s
+# A missed run is not worth catching up: the next one is 10 minutes away.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,36 @@
+[Unit]
+Description=VeloFlow: forecast every station now, then publish the document to Cloud Storage
+Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/deployment.md
+Wants=network-online.target
+After=network-online.target
+# The model is trained on the laptop and copied here by hand: until then the
+# job is skipped, not failed.
+ConditionPathExists=/var/lib/veloflow/models/lightgbm.pkl
+
+[Service]
+Type=oneshot
+User=veloflow
+Group=veloflow
+WorkingDirectory=/opt/veloflow/app
+# --publish comes from VELOFLOW_PUBLISH_URL in the env file (gs://bucket/name);
+# without it the document is only written on the VM.
+ExecStart=/opt/veloflow/app/.venv/bin/veloflow-predict --data-dir /var/lib/veloflow --model /var/lib/veloflow/models/lightgbm.pkl --out /var/lib/veloflow/serving/forecasts.json
+EnvironmentFile=-/etc/veloflow/veloflow.env
+# Ping the external monitor on success only: it alerts when no document was
+# published for 30 minutes (period 10 min + grace 20 min).
+# "$$" is a literal "$" for systemd, expanded by sh.
+ExecStopPost=-/bin/sh -c '[ "$${EXIT_STATUS}" = 0 ] && [ -n "$${VELOFLOW_PREDICT_PING_URL:-}" ] && curl -fsS -m 10 --retry 3 -o /dev/null "$${VELOFLOW_PREDICT_PING_URL}"'
+# Low priority: the collector must keep its 30 s rhythm.
+Nice=10
+IOSchedulingClass=idle
+# A run takes seconds; a stuck one must not overlap the next.
+TimeoutStartSec=5min
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/veloflow
+# Cap before measurement on the VM (see docs/deployment.md); the collector
+# and the system must keep their share of the 1 GB.
+MemoryMax=450M

@@ -10,6 +10,7 @@ writes one JSON document with the state and forecasts of every station.
 import argparse
 import json
 import logging
+import os
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, replace
@@ -28,6 +29,7 @@ from veloflow.models.artifact import ModelCard, load_model
 from veloflow.models.base import INPUT_COLUMNS
 from veloflow.models.gbm import INTERVAL_LEVEL, GradientBoosting
 from veloflow.quality.versions import select_versions, with_operational
+from veloflow.serving.publish import publish
 from veloflow.storage.compaction import STATUS_SCHEMA
 from veloflow.weather.grid import GRID
 from veloflow.weather.openmeteo import WeatherFormatError, parse_weather
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 # The longest lag feature is 60 minutes, plus the 5-minute grid tolerance.
 WINDOW_MIN = 70
 PREFIX = '{"fetched_at": "'
+PUBLISH_ENV = "VELOFLOW_PUBLISH_URL"
 STEP = "5m"
 
 
@@ -214,12 +217,14 @@ def to_document(
     }
 
 
-def write_document(document: dict[str, Any], path: Path) -> None:
-    """Write the document atomically (a reader never sees half a file)."""
+def write_document(document: dict[str, Any], path: Path) -> bytes:
+    """Write the document atomically (a reader never sees half a file); returns its bytes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(path.suffix + ".part")
-    partial.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    partial.write_bytes(payload)
     partial.replace(path)
+    return payload
 
 
 def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> int:
@@ -229,6 +234,12 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--model", type=Path, default=Path("data/models/lightgbm.pkl"))
     parser.add_argument("--out", type=Path, default=Path("data/serving/forecasts.json"))
+    parser.add_argument(
+        "--publish",
+        metavar="gs://BUCKET/NAME",
+        default=os.environ.get(PUBLISH_ENV) or None,
+        help=f"also upload the document there, as the VM's service account (env {PUBLISH_ENV})",
+    )
     args = parser.parse_args(argv)
     moment = now or datetime.now(UTC)
     model, card = load_model(args.model)
@@ -238,8 +249,11 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
         logger.error("no recent station state in %s", args.data_dir)
         return 1
     document = to_document(forecasts, load_station_information(args.data_dir), card, moment)
-    write_document(document, args.out)
+    payload = write_document(document, args.out)
     logger.info("%d stations forecast at %s", len(document["stations"]), document["origin"])
+    if args.publish:
+        sent = publish(payload, args.publish)
+        logger.info("published to %s (%d KB gzipped)", args.publish, sent // 1024)
     return 0
 
 

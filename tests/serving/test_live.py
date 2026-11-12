@@ -15,6 +15,7 @@ from veloflow.collector.storage import STATUS_DEGRADED, STATUS_FORMAT_ERROR, Raw
 from veloflow.features.build import make_context
 from veloflow.models.gbm import GradientBoosting
 from veloflow.models.train import train
+from veloflow.serving import live
 from veloflow.serving.live import (
     _fetched_at,
     latest_forecast,
@@ -215,3 +216,53 @@ def test_predict_command_without_recent_data_fails(served: Path) -> None:
         )
         == 1
     )
+
+
+def test_predict_command_can_publish(served: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    uploads: list[tuple[bytes, str]] = []
+
+    def fake_publish(payload: bytes, url: str) -> int:
+        uploads.append((payload, url))
+        return len(payload)
+
+    monkeypatch.setattr(live, "publish", fake_publish)
+    out = served / "f.json"
+
+    code = main(
+        [
+            "--data-dir",
+            str(served),
+            "--model",
+            str(served / "models" / "lightgbm.pkl"),
+            "--out",
+            str(out),
+            "--publish",
+            "gs://bucket/forecasts.json",
+        ],
+        now=NOW,
+    )
+
+    assert code == 0
+    assert uploads == [(out.read_bytes(), "gs://bucket/forecasts.json")]
+
+
+def test_predict_publishes_where_the_environment_says(
+    served: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    urls: list[str] = []
+
+    def fake_publish(payload: bytes, url: str) -> int:
+        urls.append(url)
+        return len(payload)
+
+    monkeypatch.setattr(live, "publish", fake_publish)
+    monkeypatch.setenv(live.PUBLISH_ENV, "gs://bucket/from-env.json")
+    model = str(served / "models" / "lightgbm.pkl")
+
+    assert (
+        main(
+            ["--data-dir", str(served), "--model", model, "--out", str(served / "f.json")], now=NOW
+        )
+        == 0
+    )
+    assert urls == ["gs://bucket/from-env.json"]
