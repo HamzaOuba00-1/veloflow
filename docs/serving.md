@@ -114,42 +114,44 @@ uv run veloflow-app                                         # http://localhost:8
 
 `veloflow.serving.app` (Streamlit) reads the same document as the API and
 asks it the same questions (`veloflow.serving.queries`), so both always
-agree. Two segmented controls at the top set what one is looking for (a bike
-or a dock) and when (15, 30 or 60 minutes); four tabs follow:
+agree. A dark sidebar holds the navigation and the freshness of the data; a
+search bar on top opens any station's page.
 
-| Tab | Requirement | Content |
+| Page | Requirement | Content |
 |---|---|---|
-| Map | F1 | every station, coloured by the chance to find a bike or a dock (green from 80 %, orange from 50 %, red below); tapping a station opens its forecast under the map |
-| Go now | F2 | from a station (Châtelet by default), within a walking distance: a verdict card (go, a better station nearby, or no safe bet), then every station in reach with its chance |
-| At risk | F3 | the 20 stations most likely to be empty (or full), with their state now |
-| Station | F4 | state now, then one card per horizon: counts with their 80 % interval, risks of empty and full |
+| Map | F1 | key figures, every station coloured by the chance to find a bike or a dock (green from 80 %, orange from 50 %, red below), the selected station's forecast beside the map (tap a station to select it), the network overview (share of stations with a bike now and expected at 15, 30, 60 minutes; bikes, e-bikes and docks available) and a tip naming the district where the risk concentrates |
+| Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state and forecasts, and walking directions |
+| At risk | F3 | the 20 stations most likely to be empty (or full), with their district, and the same stations on the map |
+| Station | F4 | state now with the change expected in 15 minutes, a map centred on the station, counts with their 80 % interval and risks of empty and full at 15, 30 or 60 minutes, the trend of each count, and a one-line reading of the risks |
+| About | | what the forecasts are, the data, the model, and what they are worth today |
 
 ### Design
 
-A light, minimal interface in the spirit of Apple's: system fonts (no font
-download), Apple system colours on a soft grey background, white cards with
-large radii and soft shadows, one accent blue. Controls sit at the top as
-segmented controls rather than in a sidebar, which phones hide; the four
-tabs form a pill bar. Probabilities come with a thin bar and a colour, and
-are shown as "> 99%" or "< 1%" at the extremes, never 100 % or 0 %: no
-forecast is certain. A pill in the header says "Live" with the time of the
-data, or "Delayed" with a banner when the forecasts are more than 30 minutes
-old. Streamlit's own menu, toolbar and footer are hidden.
+The layout follows the mockups of 12 November: a dark sidebar fading to a
+dusk gradient, white cards on a soft lavender background, an indigo accent,
+system fonts, line icons (inline SVG carried as `data:` images, since
+Streamlit's HTML sanitiser drops `<svg>` elements), probabilities with a thin
+bar and a colour, and "> 99%" or "< 1%" at the extremes, never 100 % or 0 %.
 
-Motion is limited to a short fade-in of the cards, a hover lift on desktop
-and a pulse on the live dot, and is switched off when the system asks for
-reduced motion. Under 640 px wide, spacing tightens, tab icons are dropped so
-the four tabs fit on one line, and the three "now" tiles stay side by side.
+Some elements of the mockups were left out on purpose, because no data
+supports them: an "overall accuracy" figure (none is measured; the map page
+shows the share of stations with a bike instead), photos of the stations, a
+waiting time, favourites, and a dark mode. Locating the user and searching by
+address need the browser's geolocation or a geocoding service; the app
+searches by station for now.
 
-Cards are built by small functions returning HTML (`header_html`,
-`verdict_html`, `critical_html`, `forecasts_html`...), tested without a
-browser; every text from the feed is escaped. The CSS targets Streamlit's
-stable test ids and ARIA attributes, not its generated class names. The
-theme (colours, light mode) is passed by `veloflow-app`, which also turns off
-Streamlit's usage statistics.
+Motion is limited to a fade-in of the cards and a pulse on the live dot, and
+is switched off when the system asks for reduced motion. On phones the
+sidebar starts folded behind its menu button and the cards stack. The CSS
+targets Streamlit's stable test ids and ARIA attributes, not its generated
+class names; Streamlit's own menu and deploy button are hidden, but not the
+button that opens the sidebar (a first version hid it with the toolbar,
+leaving phones without navigation). `veloflow-app` passes the theme and turns
+off Streamlit's usage statistics.
 
-Streamlit is in the `app` dependency group: installed on the laptop, in CI
-and in the app's container, not on the collector VM. On the document of 10
-November (1,486 stations) the page renders in under a second in Streamlit's
-headless test runner; the layout was checked in a headless Chrome at 1440 px
-and 390 px wide.
+Figures and cards come from `veloflow.serving.ui` (pure functions, every text
+from the feed escaped) and are tested without a browser; every page is also
+rendered in Streamlit's headless test runner. The layout was checked in a
+headless Chrome at 1600 px and 390 px wide. Streamlit is in the `app`
+dependency group: installed on the laptop, in CI and in the app's container,
+not on the collector VM.
