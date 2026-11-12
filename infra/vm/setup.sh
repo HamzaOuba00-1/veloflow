@@ -36,7 +36,8 @@ log "System packages"
 # No terminal over `gcloud compute ssh --command`: tell apt not to ask anything.
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git curl ca-certificates >/dev/null
+# libgomp1: OpenMP runtime that LightGBM's compiled library loads (veloflow-predict).
+apt-get install -y -qq git curl ca-certificates libgomp1 >/dev/null
 
 log "uv (installed once, system-wide)"
 if ! command -v uv >/dev/null 2>&1; then
