@@ -66,6 +66,10 @@ flowchart LR
    also scores its own past forecasts against what happened: real accuracy
    per horizon, against persistence, on the Admin page.
 
+Cards and status: [model card](docs/cards/model_card.md) ·
+[data card](docs/cards/data_card.md) ·
+[Definition of Done, box by box](docs/definition_of_done.md).
+
 ## Results
 
 Measured, with the amount of data in mind: the history started on 8 November
