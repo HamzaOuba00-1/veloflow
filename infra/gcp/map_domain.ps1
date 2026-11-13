@@ -43,6 +43,20 @@ function Invoke-Gcloud {
     if ($LASTEXITCODE -ne 0) { throw "gcloud $($args[0..3] -join ' ') failed." }
 }
 
+# 0. Domain mappings are in gcloud's beta group. Without it, gcloud starts its
+#    installation in another window and returns success: check it first, or the
+#    script would report a mapping it never created.
+#    gcloud writes its version notice to stderr: in PowerShell 5.1 with
+#    ErrorActionPreference Stop, that alone would stop the script.
+$ErrorActionPreference = "Continue"
+$beta = gcloud components list --filter="id=beta" --format="value(state.name)" 2>$null
+$ErrorActionPreference = "Stop"
+if (-not ($beta -match "Installed|Update Available")) {
+    Write-Host "gcloud's beta component is missing. Install it, then run this script again:"
+    Write-Host "    gcloud components install beta"
+    exit 1
+}
+
 # 1. Ownership of the base domain, checked by Google for the current account.
 $verified = gcloud domains list-user-verified --format="value(id)"
 if ($verified -notcontains $BaseDomain) {
