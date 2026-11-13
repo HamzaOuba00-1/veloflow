@@ -1,6 +1,8 @@
 """Tests for the web app as a whole: every page renders, headless."""
 
 import json
+import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -185,3 +187,31 @@ def test_an_unreachable_url_is_said_not_raised(monkeypatch: pytest.MonkeyPatch) 
 
     assert not page.exception
     assert "unavailable" in page.error[0].value
+
+
+def test_admin_page_without_monitoring(page: AppTest) -> None:
+    page.sidebar.radio[0].set_value("Admin").run()
+
+    assert not page.exception
+    assert "no monitoring block" in page.info[0].value
+
+
+def test_admin_page_shows_the_monitoring_block(
+    page: AppTest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status_block: Callable[..., dict[str, Any]],
+) -> None:
+    path = Path(os.environ["VELOFLOW_FORECASTS"])
+    document = json.loads(path.read_text(encoding="utf-8"))
+    folder = tmp_path / "admin"
+    folder.mkdir()
+    admin = run_on({**document, "status": status_block()}, folder, monkeypatch)
+    admin.sidebar.radio[0].set_value("Admin").run()
+
+    html = html_of(admin)
+    assert not admin.exception
+    assert "All checks pass" in html
+    assert "118 / 120" in html
+    assert "Real accuracy" in html
+    assert "Models in service" in html

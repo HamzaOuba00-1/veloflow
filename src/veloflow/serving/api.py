@@ -15,7 +15,7 @@ Endpoints (OpenAPI documentation at ``/docs``):
 
 import os
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -211,6 +211,20 @@ def create_app(store: ForecastStore) -> FastAPI:
             best=Option(**best) if best else None,
             options=options,
         )
+
+    @app.get("/status")
+    def status() -> dict[str, Any]:
+        """Monitoring, measured on the VM at each forecast run.
+
+        Collector health over the last hour, models in service, real accuracy
+        per horizon over the last 24 hours (model and persistence), interval
+        coverage, and the alerts raised by the rules it lists. 404 for a
+        document written before monitoring existed.
+        """
+        block: dict[str, Any] | None = store.document().get("status")
+        if block is None:
+            raise HTTPException(404, "this forecast document has no monitoring block")
+        return block
 
     return app
 

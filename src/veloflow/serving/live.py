@@ -13,7 +13,7 @@ import logging
 import os
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from veloflow.models.artifact import ModelCard, load_model
 from veloflow.models.base import INPUT_COLUMNS
 from veloflow.models.gbm import INTERVAL_LEVEL, GradientBoosting
 from veloflow.quality.versions import select_versions, with_operational
+from veloflow.serving.monitor import Monitor
 from veloflow.serving.publish import publish
 from veloflow.storage.compaction import STATUS_SCHEMA
 from veloflow.weather.grid import GRID
@@ -73,18 +74,35 @@ def _recent_lines(paths: list[Path], since: datetime) -> list[str]:
     return lines
 
 
-def recent_status(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> pl.DataFrame:
-    """Cleaned ``station_status`` versions of the last ``minutes`` (rules R1, R3)."""
+@dataclass(frozen=True)
+class RecentFeed:
+    """What the raw archive holds for the last minutes.
+
+    Attributes:
+        status: cleaned ``station_status`` versions (rules R1, R3).
+        fetches: one row per archived fetch: ``fetched_at`` and ``status``
+            (``ok``, ``degraded``, ``format_error``...), for the health of the
+            collector.
+    """
+
+    status: pl.DataFrame
+    fetches: pl.DataFrame
+
+
+def read_recent(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> RecentFeed:
+    """The station states and the fetches of the last ``minutes`` (one read)."""
     since = now - timedelta(minutes=minutes)
     archive = RawArchive(data_dir)
     days = sorted({since.date(), now.date()})
     frames = []
+    fetches: list[tuple[datetime, str]] = []
     seen: set[str] = set()
     for line in _recent_lines([archive.path_for(STATUS_FEED, day) for day in days], since):
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
+        fetches.append((datetime.fromisoformat(record["fetched_at"]), str(record.get("status"))))
         if record.get("status") != STATUS_OK or record.get("fingerprint") in seen:
             continue
         try:
@@ -118,11 +136,23 @@ def recent_status(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> p
             )
         )
     raw = pl.concat(frames) if frames else pl.DataFrame(schema=STATUS_SCHEMA)
-    return with_operational(select_versions(raw).frame)
+    return RecentFeed(
+        status=with_operational(select_versions(raw).frame),
+        fetches=pl.DataFrame(
+            fetches,
+            schema={"fetched_at": pl.Datetime("us", "UTC"), "status": pl.String},
+            orient="row",
+        ),
+    )
 
 
-def latest_forecast(data_dir: Path, now: datetime) -> pl.DataFrame | None:
-    """15-minute rows of the most recent weather snapshot of today or yesterday."""
+def recent_status(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> pl.DataFrame:
+    """Cleaned ``station_status`` versions of the last ``minutes`` (rules R1, R3)."""
+    return read_recent(data_dir, now, minutes).status
+
+
+def latest_weather(data_dir: Path, now: datetime) -> tuple[pl.DataFrame, datetime] | None:
+    """15-minute rows of the most recent weather snapshot of today or yesterday, and its time."""
     archive = RawArchive(data_dir)
     for day in (now.date(), now.date() - timedelta(days=1)):
         path = archive.path_for(WEATHER_FEED, day)
@@ -131,10 +161,17 @@ def latest_forecast(data_dir: Path, now: datetime) -> pl.DataFrame | None:
         records = [r for r in iter_records(path) if r.get("status") == STATUS_OK]
         for record in reversed(records):
             try:
-                return parse_weather(record["content"].encode(), GRID, "minutely_15")
+                rows = parse_weather(record["content"].encode(), GRID, "minutely_15")
             except WeatherFormatError:
                 continue
+            return rows, datetime.fromisoformat(record["fetched_at"])
     return None
+
+
+def latest_forecast(data_dir: Path, now: datetime) -> pl.DataFrame | None:
+    """15-minute rows of the most recent weather snapshot of today or yesterday."""
+    found = latest_weather(data_dir, now)
+    return found[0] if found else None
 
 
 def live_examples(status: pl.DataFrame, horizons: tuple[int, ...] = HORIZONS_MIN) -> pl.DataFrame:
@@ -243,12 +280,25 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
     args = parser.parse_args(argv)
     moment = now or datetime.now(UTC)
     model, card = load_model(args.model)
-    status = recent_status(args.data_dir, moment)
-    forecasts = forecast_now(model, status, latest_forecast(args.data_dir, moment))
+    recent = read_recent(args.data_dir, moment)
+    weather = latest_weather(args.data_dir, moment)
+    forecasts = forecast_now(model, recent.status, weather[0] if weather else None)
     if forecasts.height == 0:
         logger.error("no recent station state in %s", args.data_dir)
         return 1
     document = to_document(forecasts, load_station_information(args.data_dir), card, moment)
+    try:
+        document["status"] = Monitor(args.data_dir / "serving" / "monitor").update(
+            forecasts,
+            recent.status,
+            recent.fetches,
+            card,
+            INTERVAL_LEVEL,
+            weather[1] if weather else None,
+            moment,
+        )
+    except Exception:  # monitoring must never stop the forecasts from being published
+        logger.exception("monitoring failed; the document is published without it")
     payload = write_document(document, args.out)
     logger.info("%d stations forecast at %s", len(document["stations"]), document["origin"])
     if args.publish:

@@ -88,3 +88,66 @@ def silver_dir(synthetic_status: pl.DataFrame, tmp_path: Path) -> Path:
         folder.mkdir(parents=True)
         part.drop("day").write_parquet(folder / "station_status.parquet")
     return tmp_path
+
+
+# --- Monitoring block of the forecast document (Admin page) -----------------
+
+MONITOR_NOW = datetime(2026, 11, 13, 9, 0, tzinfo=UTC)
+_TARGET = {"mae": 0.3, "mae_persistence": 0.4, "coverage": 0.83}
+_EVENT = {"brier": 0.051, "brier_persistence": 0.08, "rate": 0.06}
+
+
+def _status_block(**changes: Any) -> dict[str, Any]:
+    block: dict[str, Any] = {
+        "collector": {
+            "last_fetch": (MONITOR_NOW - timedelta(minutes=3)).isoformat(),
+            "fetches_last_hour": 121,
+            "fetches_ok_last_hour": 118,
+            "expected_last_hour": 120,
+            "stations": 1496,
+            "stations_operational": 1460,
+        },
+        "weather": {"fetched_at": None},
+        "live": {
+            "since": "2026-11-12T22:30:00+00:00",
+            "interval_level": 0.8,
+            "horizons": {
+                "15": {
+                    "pairs": 50_000,
+                    "targets": {"mechanical": _TARGET, "docks": {**_TARGET, "mae": 0.5}},
+                    "empty": _EVENT,
+                    "full": _EVENT,
+                },
+                "60": {
+                    "pairs": 10,
+                    "targets": {"ebike": {"mae": None, "mae_persistence": None, "coverage": None}},
+                    "empty": {"brier": None, "brier_persistence": None, "rate": None},
+                    "full": _EVENT,
+                },
+            },
+        },
+        "models": [
+            {
+                "name": "lightgbm",
+                "trained_at": "2026-11-11T23:46:01",
+                "data_start": "2026-11-05T00:00:00",
+                "data_end": "2026-11-10T23:59:55",
+                "examples": 1234567,
+                "package_version": "0.1.0",
+                "in_service_from": "2026-11-12T22:30:00+00:00",
+            }
+        ],
+        "alerts": [],
+        "rules": {"live_window_hours": 24, "min_pairs": 1000, "coverage_tolerance": 0.05},
+    }
+    block.update(changes)
+    return block
+
+
+@pytest.fixture
+def status_block() -> Callable[..., dict[str, Any]]:
+    """A monitoring block as ``veloflow-predict`` writes it, measured at 09:00 UTC.
+
+    Keywords replace whole sections (``alerts=[...]``, ``live={...}``).
+    """
+    return _status_block

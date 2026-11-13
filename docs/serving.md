@@ -81,6 +81,36 @@ measured at deployment.
 Counts are rounded to one decimal, probabilities to three; intervals are the
 80 % intervals of the model.
 
+## Monitoring
+
+Each run of `veloflow-predict` also measures the service (`veloflow.serving.monitor`)
+and adds a `status` block to the document. The VM keeps its state in
+`<data dir>/serving/monitor`:
+
+1. the forecasts it publishes are kept (`forecasts/<origin>.parquet`, about
+   150 minutes: the longest horizon plus the read window);
+2. at the next runs, a kept forecast whose target time is on the grid of the
+   states just read is **scored once** against what happened: absolute error
+   of the model and of persistence (nothing changes) per count, whether the
+   count fell in the interval, squared error of the empty and full
+   probabilities. Sums per (origin, horizon) go to `scores.parquet` (7 days);
+3. the block reports, over the last 24 hours and per horizon: MAE of the model
+   and of persistence, interval coverage, Brier scores and observed rates,
+   with the number of forecasts behind each figure;
+4. the collector's health comes from the archive read for the forecast
+   (fetches of the last hour against one every 30 s, stations in service);
+5. every model card seen is recorded with the time it went into service
+   (`models.jsonl`): the history of retrainings.
+
+Alerts follow rules written in the block itself (`rules`): no fetch for 5
+minutes, no weather snapshot for 3 hours, a count forecast worse than
+persistence, or intervals covering more than 5 points away from their level.
+Accuracy rules wait for 1,000 forecasts per horizon. A failure of the
+monitoring is logged and the document is published without the block: it
+never stops the forecasts. Real accuracy is the measure that matters, but its
+24-hour window covers a few days of the week at most: it complements the
+backtest, it does not replace it.
+
 ## API
 
 ```powershell
@@ -115,6 +145,7 @@ of Paris.
 | `GET /stations`, `GET /stations/{id}` | F5 | state and forecasts of every station, or one (404 if none) |
 | `GET /critical?event=empty&horizon=60&limit=20` | F3 | stations most likely to be empty (or `full`), most likely first |
 | `GET /recommend?lat=&lon=&need=bike&horizon=15&radius_m=500` | F2 | nearby stations by distance with the chance to find a bike (`1 - P(empty)`) or a dock (`1 - P(full)`); whether to go to the nearest; the nearest station with at least 80 % |
+| `GET /status` | F6 | the monitoring block (see Monitoring below); 404 for a document written before it existed |
 
 The horizon of `/recommend` is the time it takes to get there: someone 15
 minutes away should read the 15-minute forecast.
@@ -141,6 +172,7 @@ page") or from the picker on the Station page.
 | Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state and forecasts, and walking directions |
 | At risk | F3 | the 20 stations most likely to be empty (or full), with their district, and the same stations on the map |
 | Station | F4 | state now with the change expected in 15 minutes, a map centred on the station, counts with their 80 % interval and risks of empty and full at 15, 30 or 60 minutes, the trend of each count, and a one-line reading of the risks |
+| Admin | F6 | alerts, collector health (last fetch, usable fetches of the last hour, stations in service), weather snapshot, real accuracy per horizon and count against persistence with interval coverage, Brier score of the empty and full probabilities, models in service |
 | About | | what the forecasts are, the data and the model, every figure read from the document (stations, horizons, training window and examples, interval level); accuracy is left to the evaluation report, so no measured figure goes stale in the app |
 
 ### No figure written by hand

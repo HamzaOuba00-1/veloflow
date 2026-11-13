@@ -221,3 +221,15 @@ def test_a_broken_update_keeps_the_last_good_document() -> None:
     now[0] = 61
     assert store.document() is good
     assert store.last_error is not None
+
+
+def test_status_serves_the_monitoring_block() -> None:
+    block = {"alerts": [], "live": {"horizons": {}}}
+    with_status = {**document(datetime.now(UTC)), "status": block}
+    client = TestClient(create_app(ForecastStore("x", reader=lambda _: with_status)))
+
+    assert client.get("/status").json() == block
+    without = TestClient(
+        create_app(ForecastStore("x", reader=lambda _: document(datetime.now(UTC))))
+    )
+    assert without.get("/status").status_code == 404

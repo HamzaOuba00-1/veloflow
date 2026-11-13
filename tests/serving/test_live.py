@@ -23,6 +23,7 @@ from veloflow.serving.live import (
     main,
     recent_status,
 )
+from veloflow.serving.monitor import Monitor
 from veloflow.weather.snapshot import FEED as WEATHER_FEED
 
 NOW = datetime(2026, 11, 12, 8, 3, 30, tzinfo=UTC)
@@ -197,6 +198,11 @@ def test_predict_command_writes_the_document(served: Path) -> None:
     low, high = forecast["mechanical_interval"]
     assert low <= round(forecast["mechanical"]) <= high
     assert not out.with_suffix(".json.part").exists()
+    status = document["status"]
+    assert status["collector"]["fetches_last_hour"] == 6  # every line of the last hour
+    assert status["weather"]["fetched_at"] == "2026-11-12T07:53:30+00:00"
+    assert status["models"][0]["trained_at"] == document["model"]["trained_at"]
+    assert (served / "serving" / "monitor" / "forecasts").is_dir()
 
 
 def test_predict_command_without_recent_data_fails(served: Path) -> None:
@@ -266,3 +272,17 @@ def test_predict_publishes_where_the_environment_says(
         == 0
     )
     assert urls == ["gs://bucket/from-env.json"]
+
+
+def test_a_monitoring_failure_does_not_stop_the_forecasts(
+    served: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*_: object) -> dict[str, object]:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Monitor, "update", broken)
+    out = served / "f.json"
+    model = str(served / "models" / "lightgbm.pkl")
+
+    assert main(["--data-dir", str(served), "--model", model, "--out", str(out)], now=NOW) == 0
+    assert "status" not in json.loads(out.read_text(encoding="utf-8"))

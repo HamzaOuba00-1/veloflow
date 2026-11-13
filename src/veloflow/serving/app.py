@@ -19,6 +19,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from veloflow.serving.admin import (
+    accuracy_html,
+    alerts_html,
+    events_html,
+    health_html,
+    models_html,
+)
 from veloflow.serving.queries import (
     NEED_EVENT,
     Need,
@@ -78,6 +85,7 @@ PAGES = {
     "Go now": ":material/near_me:",
     "At risk": ":material/warning:",
     "Station": ":material/location_on:",
+    "Admin": ":material/monitoring:",
     "About": ":material/info:",
 }
 NEEDS: dict[str, Need] = {"Bike": "bike", "Dock": "dock"}
@@ -290,6 +298,9 @@ header[data-testid="stHeader"] button { pointer-events: auto; }
   display: grid;
   place-items: center; flex: none; }
 .vf-tip.good .vf-tip-icon { background: #22c55e; }
+.vf-tip.poor { background: linear-gradient(135deg, #fef2f2, #fff7ed); }
+.vf-tip.poor .vf-tip-icon { background: #ef4444; }
+.vf-alerts { margin: .35rem 0 0; padding-left: 1.1rem; color: #475569; font-size: .92rem; }
 .vf-tip b { color: var(--vf-text); }
 .vf-tip p { margin: .25rem 0 0; color: #475569; font-size: .92rem; }
 .vf-netfig { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center; height: 100%;
@@ -303,6 +314,8 @@ header[data-testid="stHeader"] button { pointer-events: auto; }
 .vf-table td { padding: .5rem; border-bottom: 1px solid var(--vf-line); color: var(--vf-text); }
 .vf-table tr:last-child td { border-bottom: 0; }
 .vf-num { color: var(--vf-faint) !important; font-variant-numeric: tabular-nums; width: 2rem; }
+.vf-fig { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vf-fig b { font-weight: 600; }
 .vf-muted { color: var(--vf-muted); }
 .vf-badge { display: inline-block; padding: .15rem .55rem; border-radius: 8px; font-weight: 700;
   font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -847,6 +860,25 @@ def render() -> None:
             )
         text, mood = insight(station, horizon)
         insights.html(tip_html("Insight", text, mood))
+
+    elif page == "Admin":
+        st.html(
+            page_head_html(
+                "chart",
+                "Service health",
+                "Collector, model in service and real accuracy, measured at each forecast run.",
+                eyebrow="Admin",
+            )
+        )
+        monitoring = document.get("status")
+        if monitoring is None:
+            st.info("This forecast document has no monitoring block yet.")
+        else:
+            st.html(alerts_html(monitoring))
+            st.html(health_html(monitoring, datetime.now(UTC)))
+            st.html(accuracy_html(monitoring))
+            st.html(events_html(monitoring))
+            st.html(models_html(monitoring))
 
     else:
         st.html(
