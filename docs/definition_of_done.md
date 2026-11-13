@@ -59,13 +59,13 @@ proven, the rest is said. **Not done** = not started, or replaced (said how).
 | Box | Status | Evidence |
 |---|---|---|
 | README with results, diagram, screenshots, start in 3 commands | Done | [README](../README.md) |
-| 3-minute demo video on the day's data | To do | Script ready |
+| 3-minute demo video on the day's data | Not done | Left out by choice: the live app and the README screenshots show the service on the day's data |
 | ADRs of the key decisions, including censored demand | Partial | Decisions recorded with their reasons in the docs of each part; censored demand stated as a limit ([model card](cards/model_card.md#limits-and-risks)), no ADR files |
 
 ## Summary
 
-Of 25 boxes: 6 done, 15 partial, 2 not done or replaced, the 4 weeks in
-progress, the video to record. What is missing most is *time*: four weeks of data would
+Of 25 boxes: 6 done, 15 partial, 3 not done or replaced, the 4 weeks in
+progress. What is missing most is *time*: four weeks of data would
 rerun every result above, make the profiles meaningful and decide whether the
 model beats persistence. The bench, the monitoring and the service are in
 place to measure it.
