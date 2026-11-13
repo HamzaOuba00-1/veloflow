@@ -47,3 +47,28 @@ jobs:
 
       - name: Tests and coverage
         run: uv run pytest --cov --cov-report=term-missing
+
+  image:
+    # The serving image builds and both services start (no data: the API
+    # answers 503 on /health, which proves it runs; the app answers its own
+    # health check).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the image
+        run: docker build -t veloflow .
+
+      - name: Start the API and the app
+        run: |
+          docker run -d --name api -p 8080:8080 veloflow
+          docker run -d --name app -p 8081:8080 veloflow veloflow-app
+          for i in $(seq 30); do
+            api=$(curl -s -o /dev/null -w "%{http_code}" localhost:8080/health || true)
+            app=$(curl -s localhost:8081/_stcore/health || true)
+            [ "$api" = 503 ] && [ "$app" = ok ] && exit 0
+            sleep 2
+          done
+          docker logs api; docker logs app
+          exit 1
