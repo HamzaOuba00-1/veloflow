@@ -59,42 +59,126 @@ def html_of(page: AppTest) -> str:
     return "".join(str(getattr(element, "value", "")) for element in page.get("html"))
 
 
+def nav(page: AppTest) -> Any:
+    """The navigation of the header."""
+    return page.radio(key="page")
+
+
+def test_the_app_opens_on_the_landing_page(page: AppTest) -> None:
+    assert not page.exception
+    assert page.session_state["page"] == "Home"
+    html = html_of(page)
+    assert "Know before" in html
+    assert "every one of the 2 Vélib" in html  # figures from the document
+    assert "Live" in html
+    assert 'class="vf-footer"' in html
+
+
+def test_the_logo_opens_the_landing_page(page: AppTest) -> None:
+    nav(page).set_value("Admin").run()
+    page.button(key="brand").click().run()
+
+    assert page.session_state["page"] == "Home"
+
+
+def test_landing_buttons_open_their_pages(page: AppTest) -> None:
+    page.button(key="hero-map").click().run()
+    assert page.session_state["page"] == "Map"
+
+    nav(page).set_value("Home").run()
+    page.button(key="feature-at-risk").click().run()
+    assert page.session_state["page"] == "At risk"
+
+
 def test_map_page_opens_on_the_central_station(page: AppTest) -> None:
+    nav(page).set_value("Map").run()
+
     assert not page.exception
     html = html_of(page)
     assert "Vélib&#x27; station forecasts" in html or "Vélib' station forecasts" in html
     assert "Châtelet" in html
-    assert "Live data" in html
+
+
+def test_the_url_opens_a_page_and_a_station(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "origin": "2026-11-12T08:00:00+00:00",
+        "model": {"name": "lightgbm", "trained_at": "x", "data_end": "2026-11-11T23:59:00"},
+        "stations": [
+            station(1, "Châtelet", 48.8584, 0.05),
+            station(2, "Bastille", 48.8532, 0.7),
+        ],
+    }
+    path = tmp_path / "forecasts.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setenv("VELOFLOW_FORECASTS", str(path))
+    app = AppTest.from_file(APP, default_timeout=30)
+    app.query_params["page"] = "station"
+    app.query_params["station"] = "2"
+    app.run()
+
+    assert not app.exception
+    assert app.session_state["page"] == "Station"
+    assert app.session_state["station"] == "Bastille"
+    assert "High risk of no bike" in html_of(app)
+
+
+def test_an_unknown_page_in_the_url_opens_the_landing_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "forecasts.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(UTC).isoformat(),
+                "origin": "2026-11-12T08:00:00+00:00",
+                "model": {"name": "lightgbm", "data_end": "2026-11-11T23:59:00"},
+                "stations": [station(1, "Châtelet", 48.8584, 0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VELOFLOW_FORECASTS", str(path))
+    app = AppTest.from_file(APP, default_timeout=30)
+    app.query_params["page"] = "nowhere"
+    app.query_params["station"] = "999"
+    app.run()
+
+    assert not app.exception
+    assert app.session_state["page"] == "Home"
+    assert app.session_state["station"] == "Châtelet"
 
 
 @pytest.mark.parametrize("name", list(PAGES))
 def test_every_page_renders(page: AppTest, name: str) -> None:
-    page.sidebar.radio[0].set_value(name).run()
+    nav(page).set_value(name).run()
 
     assert not page.exception
     assert html_of(page)
 
 
 def test_go_now_suggests_a_station_and_directions(page: AppTest) -> None:
-    page.sidebar.radio[0].set_value("Go now").run()
+    nav(page).set_value("Go now").run()
 
     assert "chance of a bike in 15 min" in html_of(page)
     assert page.get("link_button")
 
 
 def test_at_risk_lists_the_riskiest_first(page: AppTest) -> None:
-    page.sidebar.radio[0].set_value("At risk").run()
+    nav(page).set_value("At risk").run()
 
     html = html_of(page)
     assert html.index("Bastille") < html.index("Châtelet")
 
 
 def test_the_map_card_opens_the_station_page(page: AppTest) -> None:
-    page.sidebar.radio[0].set_value("Station").run()
-    page.selectbox[0].set_value("Bastille").run()
-    page.sidebar.radio[0].set_value("Map").run()
+    nav(page).set_value("Station").run()
+    page.selectbox(key="station_pick").set_value("Bastille").run()
+    nav(page).set_value("Map").run()
 
-    page.button[0].click().run()
+    page.button(key="open-station").click().run()
 
     assert page.session_state["page"] == "Station"
     assert page.session_state["station"] == "Bastille"
@@ -130,11 +214,11 @@ def test_figures_follow_the_document(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("VELOFLOW_FORECASTS", str(path))
     page = AppTest.from_file(APP, default_timeout=30).run()
 
-    page.sidebar.radio[0].set_value("Go now").run()
+    nav(page).set_value("Go now").run()
     assert "chance of a bike in 10 min" in html_of(page)
-    page.sidebar.radio[0].set_value("At risk").run()
+    nav(page).set_value("At risk").run()
     assert "The 3 stations most likely to be empty in 10 minutes." in html_of(page)
-    page.sidebar.radio[0].set_value("About").run()
+    nav(page).set_value("About").run()
     about = html_of(page)
     assert "each of the 3 Vélib" in about
     assert "10 and 20 minutes ahead" in about
@@ -161,7 +245,7 @@ def run_on(document: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ap
 def test_a_station_gone_from_the_document(page: AppTest, name: str) -> None:
     """The chosen station left the feed between two updates: back to a known one."""
     page.session_state["station"] = "Closed since the last update"
-    page.sidebar.radio[0].set_value(name).run()
+    nav(page).set_value(name).run()
 
     assert not page.exception
     assert page.session_state["station"] in {"Châtelet", "Bastille"}
@@ -190,7 +274,7 @@ def test_an_unreachable_url_is_said_not_raised(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_admin_page_without_monitoring(page: AppTest) -> None:
-    page.sidebar.radio[0].set_value("Admin").run()
+    nav(page).set_value("Admin").run()
 
     assert not page.exception
     assert "no monitoring block" in page.info[0].value
@@ -207,7 +291,7 @@ def test_admin_page_shows_the_monitoring_block(
     folder = tmp_path / "admin"
     folder.mkdir()
     admin = run_on({**document, "status": status_block()}, folder, monkeypatch)
-    admin.sidebar.radio[0].set_value("Admin").run()
+    nav(admin).set_value("Admin").run()
 
     html = html_of(admin)
     assert not admin.exception

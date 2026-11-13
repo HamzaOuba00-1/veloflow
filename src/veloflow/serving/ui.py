@@ -1,22 +1,20 @@
-"""Building blocks of the web app: figures and the HTML of its cards.
+"""Building blocks of the web app: figures and the HTML of its components.
 
-Figures are computed from a forecast document; cards are HTML strings.
+Figures are computed from a forecast document; components are HTML strings
+styled by the design system (``theme.py`` tokens, ``static/css/veloflow.css``).
 
 Pure functions, tested without a browser. Every text that comes from the feed
 (station names) is escaped. Icons are SVG in one line style, so the app needs
-no icon font. The logo and the Paris scenes are original drawings bundled in
-``assets/``; a photo dropped next to a drawing with the same name (for example
-``assets/hero.jpg``) replaces it.
+no icon font. Pictures are served from ``static/images`` (see ``theme``).
 """
 
 import base64
 from datetime import datetime
-from functools import lru_cache
 from html import escape
-from importlib.resources import files
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from veloflow.serving import theme
 from veloflow.serving.queries import NEED_EVENT, Need, distance_m
 
 PARIS = ZoneInfo("Europe/Paris")
@@ -27,25 +25,19 @@ GOOD, FAIR = 0.8, 0.5  # chance of success: good from GOOD, fair from FAIR
 WATCH = 0.2  # a risk of empty or full is worth showing from WATCH
 WALK_M_PER_MIN = 80  # walking speed (4.8 km/h) to turn distances into minutes
 DASH = "\u2013"  # en dash, for ranges
-# Status colours (map, chances) and the accent of the interface.
-GREEN, ORANGE, RED = [34, 197, 94, 235], [245, 158, 11, 235], [239, 68, 68, 235]
-TONES = {"good": "#16a34a", "fair": "#d97706", "poor": "#dc2626"}
-NEUTRAL = "#94a3b8"
-ACCENT = "#6366f1"
+# Status colours (map dots, text of chances and risks) and the accent.
+GREEN, ORANGE, RED = theme.MAP_GOOD, theme.MAP_FAIR, theme.MAP_POOR
+TONES = {"good": theme.SUCCESS, "fair": theme.WARNING, "poor": theme.ERROR}
+NEUTRAL = theme.BORDER_STRONG
+ACCENT = theme.PRIMARY
+COUNT_COLOURS = theme.COUNT_COLOURS
 COUNTS = (
     ("mechanical", "Mechanical bikes", "bike"),
     ("ebike", "E-bikes", "zap"),
     ("docks", "Free docks", "dock"),
 )
-ASSETS = files("veloflow.serving") / "assets"
-MIME = {
-    ".webp": "image/webp",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-}
-COUNT_COLOURS = {"mechanical": "#4f6bed", "ebike": "#8b5cf6", "docks": "#16a34a"}
+SHORT_LABELS = {"mechanical": "Mechanical", "ebike": "E-bikes", "docks": "Docks"}
+FAVICON = theme.STATIC / "images" / "favicon.png"
 
 _PATHS = {
     "bike": '<circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/>'
@@ -67,10 +59,13 @@ _PATHS = {
     "check": '<path d="m5 12 5 5L20 7"/>',
     "walk": '<circle cx="13" cy="4" r="2"/><path d="m9 21 3-6-3-3 1-5 4 3 3 1M7 12l2-5"/>',
     "pie": '<path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+    "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    "shield": '<path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3z"/>'
+    '<path d="m9 12 2 2 4-4"/>',
 }
 
 
-def icon(name: str, size: int = 20, colour: str = "#475569") -> str:
+def icon(name: str, size: int = 20, colour: str = theme.TEXT_SECONDARY) -> str:
     """An icon as an inline image (24 x 24 grid, 1.8 px stroke).
 
     Streamlit sanitises ``st.html`` and drops ``<svg>`` elements, but keeps
@@ -139,6 +134,16 @@ def risk_colour(probability: float) -> str:
     if probability >= FAIR:
         return TONES["poor"]
     return TONES["fair"] if probability >= WATCH else NEUTRAL
+
+
+def risk_tone(probability: float) -> str:
+    """Tone of a risk (empty or full): ``poor`` from ``FAIR``, ``fair`` from ``WATCH``.
+
+    Below ``WATCH`` the tone is empty (neutral).
+    """
+    if probability >= FAIR:
+        return "poor"
+    return "fair" if probability >= WATCH else ""
 
 
 def district(code: str | None) -> str:
@@ -276,19 +281,9 @@ def _bar(value: float, fill: str) -> str:
     return f'<div class="vf-bar"><span style="width:{width:.1f}%;background:{fill}"></span></div>'
 
 
-@lru_cache
-def asset_uri(stem: str) -> str:
-    """Data URI of a bundled picture: a photo of that name wins over the drawing.
-
-    Pictures are inlined because Streamlit's HTML sanitiser keeps ``data:``
-    images but strips inline SVG, and the app then serves no static files.
-    """
-    for suffix, mime in MIME.items():
-        resource = ASSETS / f"{stem}{suffix}"
-        if resource.is_file():
-            encoded = base64.b64encode(resource.read_bytes()).decode()
-            return f"data:{mime};base64,{encoded}"
-    raise FileNotFoundError(f"no picture named {stem!r} in {ASSETS}")
+def hex_colour(rgba: list[int]) -> str:
+    """``#rrggbb`` of a map colour (its alpha left out)."""
+    return "#" + "".join(f"{c:02x}" for c in rgba[:3])
 
 
 def age_text(age_s: float) -> str:
@@ -300,76 +295,70 @@ def age_text(age_s: float) -> str:
     return f"{hours} h ago" if rest == 0 else f"{hours} h {rest:02d} ago"
 
 
-def sidebar_status_html(document: dict[str, Any], status: str, age_s: float = 0.0) -> str:
-    """The live data card at the bottom of the sidebar, over the Paris scene.
+def updated_at(document: dict[str, Any]) -> str:
+    """Paris time of the forecast origin (``14:45``)."""
+    return f"{datetime.fromisoformat(document['origin']).astimezone(PARIS):%H:%M}"
 
-    Late forecasts turn it amber and say how old they are; no banner is
-    shown on the page (``stale_chip_html`` stands in on phones, where the
-    sidebar is folded).
-    """
-    origin = datetime.fromisoformat(document["origin"]).astimezone(PARIS)
-    stale = status == "stale"
-    when = f"Updated {origin:%H:%M}" + (f", {age_text(age_s)}" if stale else "")
+
+def live_status_html(document: dict[str, Any], status: str, age_s: float = 0.0) -> str:
+    """The freshness pill of the header: live, or delayed with the age of the data."""
+    if status == "stale":
+        return (
+            f'<div class="vf-live stale" role="status"><span class="vf-dot"></span>'
+            f'<b>Delayed data</b><span class="vf-live-time">· updated {age_text(age_s)}</span>'
+            "</div>"
+        )
     return (
-        f'<div class="vf-side-scene"><img src="{asset_uri("sidebar")}" alt="">'
-        f'<div class="vf-side-live {"stale" if stale else ""}"><span class="vf-dot"></span>'
-        f"<div><b>{'Delayed data' if stale else 'Live data'}</b>"
-        f"<small>{when}</small></div></div></div>"
+        f'<div class="vf-live" role="status"><span class="vf-dot"></span><b>Live</b>'
+        f'<span class="vf-live-time">· Updated {updated_at(document)}</span></div>'
     )
 
 
-def stale_chip_html(age_s: float) -> str:
-    """A small "delayed data" chip for phones, where the sidebar card is hidden."""
+def brand_html(href: str | None = None) -> str:
+    """Logo tile and name; a link to ``href`` when given (the footer)."""
+    logo = theme.image_url("logo")
+    mark = f'<img src="{logo}" alt="" width="24" height="19">' if logo else icon("bike", 20, "#fff")
+    inner = f'<span class="vf-brand-mark">{mark}</span><span class="vf-brand-name">VéloFlow</span>'
+    if href:
+        return f'<a class="vf-brand" href="{href}" aria-label="VéloFlow home">{inner}</a>'
+    return f'<div class="vf-brand">{inner}</div>'
+
+
+def page_head_html(title: str, subtitle: str, eyebrow: str | None = None) -> str:
+    """Title block of a page: eyebrow, title, one line of context."""
+    chip = f'<div class="vf-eyebrow">{escape(eyebrow)}</div>' if eyebrow else ""
     return (
-        f'<div class="vf-stale-chip"><span class="vf-dot"></span>Delayed data, '
-        f"updated {age_text(age_s)}</div>"
+        f'<header class="vf-head">{chip}<h1>{escape(title)}</h1><p>{escape(subtitle)}</p></header>'
     )
 
 
-def brand_html() -> str:
-    """Logo and name at the top of the sidebar."""
+def stat_html(
+    icon_name: str, tint: str, value: str, label: str, note: str = "", trend: str = ""
+) -> str:
+    """One key figure: icon tile, value, label and an optional note (``up``/``down``)."""
+    extra = f'<div class="vf-stat-note {trend}">{escape(note)}</div>' if note else ""
     return (
-        f'<div class="vf-brand"><img class="vf-logo" src="{asset_uri("logo")}" alt="">'
-        '<div class="vf-brand-name">VéloFlow</div>'
-        '<div class="vf-brand-sub">Smart Vélib\' forecasts</div></div>'
+        f'<div class="vf-stat"><span class="vf-icon-tile" style="background:{tint}14">'
+        f'{icon(icon_name, 22, tint)}</span><div><div class="vf-stat-value">{escape(value)}'
+        f'</div><div class="vf-stat-label">{escape(label)}</div>{extra}</div></div>'
     )
 
 
-def page_head_html(icon_name: str, title: str, subtitle: str, eyebrow: str | None = None) -> str:
-    """Title block of a page, over the Paris skyline."""
-    chip = (
-        f'<span class="vf-chip-accent">{icon("pin", 14)} {escape(eyebrow)}</span>'
-        if eyebrow
-        else ""
-    )
-    return (
-        f'<div class="vf-page-head"><img class="vf-hero" src="{asset_uri("hero")}" alt="">'
-        f'{chip}<div class="vf-page-title"><span class="vf-page-icon">'
-        f"{icon(icon_name, 30, ACCENT)}</span><div><h1>{escape(title)}</h1>"
-        f"<p>{escape(subtitle)}</p></div></div></div>"
-    )
-
-
-def kpi_html(icon_name: str, tint: str, value: str, label: str, note: str = "") -> str:
-    """A key figure with its icon."""
-    extra = f'<div class="vf-kpi-note">{escape(note)}</div>' if note else ""
-    return (
-        f'<div class="vf-card vf-kpi"><div class="vf-kpi-icon" style="background:{tint}1f">'
-        f'{icon(icon_name, 26, tint)}</div><div><div class="vf-kpi-value">{escape(value)}</div>'
-        f'<div class="vf-kpi-label">{escape(label)}</div>{extra}</div></div>'
-    )
+def stats_html(cells: list[str]) -> str:
+    """Key figures side by side in one card."""
+    return f'<div class="vf-stats">{"".join(cells)}</div>'
 
 
 def count_cards_html(station: dict[str, Any], horizon: str) -> str:
     """Forecast of the three counts at a horizon, each with its 80 % interval."""
     forecast = station["forecasts"][horizon]
     cards = []
-    for key, label, icon_name in COUNTS:
+    for key, _, icon_name in COUNTS:
         low, high = forecast[f"{key}_interval"]
         capacity = max(1.0, float(station.get("capacity") or 0) or high or 1.0)
         cards.append(
-            f'<div class="vf-count" style="--tint:{COUNT_COLOURS[key]}">'
-            f'{icon(icon_name, 24, COUNT_COLOURS[key])}<div class="vf-count-label">{label}</div>'
+            f'<div class="vf-count"><div class="vf-count-label">'
+            f"{icon(icon_name, 16, COUNT_COLOURS[key])}{SHORT_LABELS[key]}</div>"
             f'<div class="vf-count-value">{forecast[key]:.0f}</div>'
             f'<div class="vf-count-note">likely {low:.0f}{DASH}{high:.0f}</div>'
             f"{_bar(forecast[key] / capacity, COUNT_COLOURS[key])}</div>"
@@ -381,9 +370,9 @@ def risk_cards_html(station: dict[str, Any], horizon: str) -> str:
     """Probabilities that the station is empty, or full, at a horizon."""
     forecast = station["forecasts"][horizon]
     cards = "".join(
-        f'<div class="vf-risk"><span class="vf-ring" style="border-color:{risk_colour(p)}"></span>'
-        f'<div class="vf-risk-body"><div class="vf-risk-value">{percent(p)}</div>'
-        f'<div class="vf-risk-label">{label}</div>{_bar(p, risk_colour(p))}</div></div>'
+        f'<div class="vf-risk"><div class="vf-risk-top"><span class="vf-risk-value" '
+        f'style="color:{TONES.get(risk_tone(p), theme.TEXT)}">{percent(p)}</span></div>'
+        f'<div class="vf-risk-label">{label}</div>{_bar(p, risk_colour(p))}</div>'
         for label, p in (
             ("Station empty", forecast["p_empty"]),
             ("Station full", forecast["p_full"]),
@@ -392,44 +381,42 @@ def risk_cards_html(station: dict[str, Any], horizon: str) -> str:
     return f'<div class="vf-risks">{cards}</div>'
 
 
-def station_head_html(station: dict[str, Any], extra: str = "") -> str:
-    """Name and district of a station."""
+def station_head_html(station: dict[str, Any], extra: str = "", *, xl: bool = False) -> str:
+    """Name and district of a station (``xl``: the title of the station page)."""
+    size = 26 if xl else 20
+    tag = "h1" if xl else "div"
     return (
-        f'<div class="vf-station-head"><span class="vf-pin">{icon("pin", 22, ACCENT)}</span><div>'
-        f'<div class="vf-station-name">{escape(station["name"])}</div>'
-        f'<div class="vf-station-sub">{district(station["code"])}{extra}</div></div></div>'
+        f'<div class="vf-station{" xl" if xl else ""}">'
+        f'<span class="vf-icon-tile{" lg" if xl else ""}">{icon("pin", size, ACCENT)}</span><div>'
+        f'<{tag} class="vf-station-name">{escape(station["name"])}</{tag}>'
+        f'<div class="vf-station-sub">{district(station["code"])}{escape(extra)}</div></div></div>'
     )
 
 
 def now_tiles_html(station: dict[str, Any]) -> str:
     """What the station holds now, with the change expected at the shortest horizon."""
     first = station_horizons(station)[0] if station["forecasts"] else None
-    tiles = []
+    cells = []
     for key, label, icon_name in COUNTS:
         now = station["now"][key]
         later = station["forecasts"][first].get(key) if first else None
-        delta = ""
+        note, trend = "", ""
         if later is not None:
             change = round(later - now)
             arrow = "↑" if change > 0 else "↓" if change < 0 else "→"
-            delta = f'<div class="vf-kpi-note">{arrow} {change:+d} in {first} min</div>'
-        tiles.append(
-            f'<div class="vf-card vf-kpi"><div class="vf-kpi-icon" style="background:'
-            f'{COUNT_COLOURS[key]}1f">{icon(icon_name, 26, COUNT_COLOURS[key])}</div><div>'
-            f'<div class="vf-kpi-value">{now:.0f}</div><div class="vf-kpi-label">{label}</div>'
-            f"{delta}</div></div>"
-        )
-    return f'<div class="vf-kpis">{"".join(tiles)}</div>'
+            note = f"{arrow} {change:+d} in {first} min"
+            trend = "up" if change > 0 else "down" if change < 0 else ""
+        cells.append(stat_html(icon_name, COUNT_COLOURS[key], f"{now:.0f}", label, note, trend))
+    return stats_html(cells)
 
 
 def now_compact_html(station: dict[str, Any]) -> str:
     """What a station holds now, in three compact tiles (icon, number, label)."""
     tiles = "".join(
-        f'<div class="vf-mini" style="--tint:{COUNT_COLOURS[key]}">'
-        f"{icon(icon_name, 22, COUNT_COLOURS[key])}"
+        f'<div class="vf-mini">{icon(icon_name, 18, COUNT_COLOURS[key])}'
         f'<div class="vf-mini-value">{station["now"][key]:.0f}</div>'
-        f'<div class="vf-mini-label">{label}</div></div>'
-        for key, label, icon_name in COUNTS
+        f'<div class="vf-mini-label">{SHORT_LABELS[key]}</div></div>'
+        for key, _, icon_name in COUNTS
     )
     return f'<div class="vf-minis">{tiles}</div>'
 
@@ -438,22 +425,24 @@ def horizon_table_html(station: dict[str, Any]) -> str:
     """Mechanical / e-bikes / docks forecast at every horizon of the station."""
     hs = station_horizons(station)
     cells = "".join(
-        f'<div class="vf-hcell"><div class="vf-hcell-h">{h} min</div><div class="vf-hcell-v">'
+        f'<div class="vf-hcell"><div class="vf-hcell-h">In {h} min</div><div class="vf-hcell-v">'
         f"{station['forecasts'][h]['mechanical']:.0f} / {station['forecasts'][h]['ebike']:.0f} / "
         f"{station['forecasts'][h]['docks']:.0f}</div></div>"
         for h in hs
     )
     return (
-        f'<div class="vf-section-title">{icon("clock", 18)} Next {" / ".join(hs)} min '
+        f'<div class="vf-subtitle"><b>Next {" / ".join(hs)} min</b>'
         f'<small>mechanical / e-bikes / docks</small></div><div class="vf-hgrid">{cells}</div>'
     )
 
 
-def tip_html(title: str, text: str, tone_name: str = "fair") -> str:
-    """A highlighted tip or insight."""
-    mark = icon("check", 22, "#ffffff") if tone_name == "good" else icon("bulb", 22, "#ffffff")
+def tip_html(title: str, text: str, tone_name: str = "info") -> str:
+    """A callout: ``info`` (violet), ``good``, ``fair`` or ``poor``."""
+    mark = icon("check", 18, "#ffffff") if tone_name == "good" else icon("bulb", 18, "#ffffff")
+    if tone_name == "poor":
+        mark = icon("alert", 18, "#ffffff")
     return (
-        f'<div class="vf-card vf-tip {tone_name}"><span class="vf-tip-icon">{mark}</span>'
+        f'<div class="vf-callout {tone_name}"><span class="vf-callout-icon">{mark}</span>'
         f"<div><b>{escape(title)}</b><p>{escape(text)}</p></div></div>"
     )
 
@@ -466,56 +455,70 @@ def network_figures_html(summary: dict[str, float]) -> str:
         ("dock", COUNT_COLOURS["docks"], f"{summary['docks']:,.0f}", "Free docks"),
     )
     return (
-        '<div class="vf-netfig">'
+        '<div class="vf-card-title">Across the network now</div><div class="vf-figures">'
         + "".join(
-            f"<div>{icon(name, 26, tint)}<div><b>{value}</b><small>{label}</small></div></div>"
+            f'<div class="vf-figure"><span class="vf-icon-tile" style="background:{tint}14">'
+            f"{icon(name, 20, tint)}</span><div><b>{value}</b><small>{label}</small></div></div>"
             for name, tint, value, label in items
         )
         + "</div>"
     )
 
 
+def empty_html(title: str, text: str) -> str:
+    """An empty state: what is missing, and what to do."""
+    return (
+        f'<div class="vf-empty">{icon("info", 28, theme.TEXT_TERTIARY)}<b>{escape(title)}</b>'
+        f"<span>{escape(text)}</span></div>"
+    )
+
+
 def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], horizon: str, event: str) -> str:
     """The at-risk stations, most likely first."""
     if not ranked:
-        return f'<div class="vf-card vf-muted">No station is likely to be {event} right now.</div>'
+        empty = empty_html("All clear", f"No station is likely to be {event} right now.")
+        return f'<div class="vf-card">{empty}</div>'
     rows = "".join(
         f'<tr><td class="vf-num">{i}</td><td>{escape(s["name"])}</td>'
-        f'<td class="vf-muted">{district(s["code"])}</td><td><span class="vf-badge" '
-        f'style="color:{risk_colour(p)};background:{risk_colour(p)}1a">{percent(p)}</span></td></tr>'
+        f'<td class="vf-muted">{district(s["code"])}</td><td class="r"><span class="vf-badge '
+        f'{risk_tone(p)}">{percent(p)}</span></td></tr>'
         for i, (p, s) in enumerate(ranked, start=1)
     )
     return (
-        f'<div class="vf-card vf-table-card"><div class="vf-section-title">{icon("chart", 18)} '
-        f'Top {len(ranked)} at-risk stations</div><table class="vf-table"><thead><tr><th>#</th>'
-        f"<th>Station</th><th>District</th><th>{event.capitalize()} in {horizon} min</th></tr>"
-        f"</thead><tbody>{rows}</tbody></table></div>"
+        f'<div class="vf-card"><div class="vf-card-title">Top {len(ranked)} at-risk stations'
+        f'<small>{event.capitalize()} in {horizon} min</small></div><div class="vf-table-wrap">'
+        '<table class="vf-table"><thead><tr><th scope="col">#</th><th scope="col">Station</th>'
+        f'<th scope="col">District</th><th scope="col" class="r">Chance</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div></div>"
     )
 
 
-def options_html(options: list[dict[str, Any]], need: Need) -> str:
+def options_html(options: list[dict[str, Any]], need: Need, *, grid: bool = False) -> str:
     """Stations within reach, nearest first, with the chance of success."""
     if not options:
-        return '<div class="vf-muted">No station within this walking distance.</div>'
+        return empty_html(
+            "No station within this walking distance", "Choose a longer walking time."
+        )
     thing = "bike" if need == "bike" else "dock"
     rows = "".join(
-        f'<div class="vf-opt"><div><div class="vf-opt-name">{escape(o["station"]["name"])}</div>'
-        f"<small>{o['distance_m']:.0f} m · ~{walk_minutes(o['distance_m'])} min walk</small>"
-        f'</div><span class="vf-badge" style="color:{TONES[tone(o["probability"])]};background:'
-        f'{TONES[tone(o["probability"])]}1a">{percent(o["probability"])} {thing}</span></div>'
+        f'<div class="vf-list-item"><div style="min-width:0"><div class="vf-list-name">'
+        f'{escape(o["station"]["name"])}</div><div class="vf-list-meta">{o["distance_m"]:.0f} m'
+        f" · ~{walk_minutes(o['distance_m'])} min walk</div></div>"
+        f'<span class="vf-badge {tone(o["probability"])}">{percent(o["probability"])} {thing}'
+        "</span></div>"
         for o in options[:8]
     )
-    return f'<div class="vf-opts">{rows}</div>'
+    return f'<div class="vf-list{" vf-list-grid" if grid else ""}">{rows}</div>'
 
 
-def legend_html(labels: tuple[str, str, str]) -> str:
-    """Colour key of a map."""
-    swatches = ("#22c55e", "#f59e0b", "#ef4444")
+def legend_html(labels: tuple[str, str, str], extra: tuple[tuple[str, str], ...] = ()) -> str:
+    """Colour key of a chance map; ``extra`` adds (colour, label) entries."""
+    swatches = (hex_colour(GREEN), hex_colour(ORANGE), hex_colour(RED))
+    entries = (*zip(swatches, labels, strict=True), *extra)
     return (
         '<div class="vf-legend">'
         + "".join(
-            f'<span><i style="background:{c}"></i>{escape(label)}</span>'
-            for c, label in zip(swatches, labels, strict=True)
+            f'<span><i style="background:{c}"></i>{escape(label)}</span>' for c, label in entries
         )
         + "</div>"
     )
@@ -527,13 +530,13 @@ def _when(stamp: Any) -> str:
     return f"{moment:%d %b %Y %H:%M} UTC"
 
 
-def _series(items: list[str]) -> str:
+def series(items: list[str]) -> str:
     """``15, 30 and 60`` from a list of words."""
     return items[0] if len(items) < 2 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def about_html(document: dict[str, Any]) -> str:
-    """The About card, every figure read from the forecast document.
+    """The About text, every figure read from the forecast document.
 
     Fields missing from older documents are left out rather than guessed.
     """
@@ -550,9 +553,9 @@ def about_html(document: dict[str, Any]) -> str:
         else ""
     )
     return (
-        '<div class="vf-card vf-about"><p>VéloFlow forecasts, for each of the '
+        '<div class="vf-card"><div class="vf-prose"><p>VéloFlow forecasts, for each of the '
         f"{len(stations):,} Vélib' Métropole stations of this update, the number of mechanical "
-        f"bikes, e-bikes and free docks {_series(horizons(stations))} minutes ahead, and the "
+        f"bikes, e-bikes and free docks {series(horizons(stations))} minutes ahead, and the "
         "probability that the station will be empty or full.</p>"
         "<h3>Data</h3><p>The public Vélib' feed, cleaned by explicit quality rules (stale "
         "versions, closed stations, frozen feed); Open-Meteo weather forecasts; the French "
@@ -565,6 +568,8 @@ def about_html(document: dict[str, Any]) -> str:
         "<h3>Accuracy</h3><p>Measured by that backtest against simple baselines, and re-run "
         "as the history grows; the figures are in the evaluation report, not repeated here "
         "so that they never go stale.</p>"
-        '<p><a href="https://github.com/HamzaOuba00-1/veloflow">Source code and evaluation '
-        "on GitHub</a></p></div>"
+        f'<p><a href="{GITHUB}">Source code and evaluation on GitHub</a></p></div></div>'
     )
+
+
+GITHUB = "https://github.com/HamzaOuba00-1/veloflow"

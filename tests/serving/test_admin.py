@@ -37,7 +37,7 @@ def test_health_figures_come_from_the_block(status_block: Block) -> None:
 def test_accuracy_table(status_block: Block) -> None:
     html = accuracy_html(status_block())
 
-    assert "Real accuracy, last 24 h (since 12 Nov 2026 22:30 UTC)" in html
+    assert "Real accuracy, last 24 h<small>since 12 Nov 2026 22:30 UTC</small>" in html
     assert "+25%" in html  # 1 - 0.3 / 0.4
     assert "-25%" in html  # 1 - 0.5 / 0.4
     assert "83%" in html

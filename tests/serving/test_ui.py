@@ -1,12 +1,10 @@
 """Tests for the building blocks of the web app (figures and HTML cards)."""
 
 import base64
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from veloflow.serving import ui
 from veloflow.serving.ui import (
     DASH,
     GREEN,
@@ -16,7 +14,6 @@ from veloflow.serving.ui import (
     TONES,
     about_html,
     age_text,
-    asset_uri,
     band_labels,
     brand_html,
     chance,
@@ -28,8 +25,8 @@ from veloflow.serving.ui import (
     horizons,
     icon,
     insight,
-    kpi_html,
     legend_html,
+    live_status_html,
     map_points,
     nearest_index,
     network_figures_html,
@@ -43,11 +40,12 @@ from veloflow.serving.ui import (
     risk_cards_html,
     risk_colour,
     risk_table_html,
-    sidebar_status_html,
+    risk_tone,
     smart_tip,
-    stale_chip_html,
+    stat_html,
     station_head_html,
     station_trend,
+    stats_html,
     tip_html,
     tone,
     walk_minutes,
@@ -211,16 +209,18 @@ def test_cards_render_the_figures() -> None:
     assert now_compact_html(STATIONS[0]).count('vf-mini"') == 3
     assert "3 / 1 / 4" in horizon_table_html(STATIONS[0])
     assert "Paris 4e · 120 m" in station_head_html(STATIONS[0], " · 120 m")
+    assert "<h1 " in station_head_html(STATIONS[0], xl=True)
 
 
 def test_page_parts() -> None:
     document = {"origin": "2026-11-12T08:00:00+00:00", "stations": STATIONS}
 
-    assert "Delayed data" in sidebar_status_html(document, "stale")
-    late = sidebar_status_html(document, "stale", 2 * 3600 + 5 * 60)
-    assert "Updated 09:00, 2 h 05 ago" in late
-    assert "ago" not in sidebar_status_html(document, "ok", 60)
-    assert "updated 45 min ago" in stale_chip_html(45 * 60)
+    assert "Delayed data" in live_status_html(document, "stale")
+    late = live_status_html(document, "stale", 2 * 3600 + 5 * 60)
+    assert "updated 2 h 05 ago" in late
+    live = live_status_html(document, "ok", 60)
+    assert "Updated 09:00" in live  # Paris time of the origin
+    assert "ago" not in live
     assert [age_text(s) for s in (20, 45 * 60, 2 * 3600, 2 * 3600 + 5 * 60)] == [
         "0 min ago",
         "45 min ago",
@@ -228,15 +228,19 @@ def test_page_parts() -> None:
         "2 h 05 ago",
     ]
     assert "VéloFlow" in brand_html()
-    assert asset_uri("logo") in brand_html()
-    assert asset_uri("sidebar") in sidebar_status_html(document, "ok")
-    head = page_head_html("map", "Title", "Subtitle", eyebrow="Map")
+    assert "app/static/images/logo.png" in brand_html()
+    assert brand_html(href="?page=home").startswith('<a class="vf-brand" href="?page=home"')
+    head = page_head_html("Title", "Subtitle", eyebrow="Map")
+    assert "<h1>Title</h1>" in head
     assert "Map" in head
-    assert asset_uri("hero") in head
-    assert "1,486" in kpi_html("bike", "#000000", "1,486", "Stations", note="today")
+    cells = [stat_html("bike", "#000000", "1,486", "Stations", note="↑ +1", trend="up")]
+    assert "1,486" in stats_html(cells)
+    assert 'vf-stat-note up"' in cells[0]
     assert "Bikes" in tip_html("Bikes", "text", "good")
     assert "12" in network_figures_html({"mechanical": 12, "ebike": 3, "docks": 7})
     assert legend_html(("a", "b", "c")).count("<i ") == 3
+    assert "You" in legend_html(("a", "b", "c"), (("#000000", "You"),))
+    assert [risk_tone(p) for p in (0.6, 0.3, 0.1)] == ["poor", "fair", ""]
 
 
 def test_tables_and_lists() -> None:
@@ -250,6 +254,9 @@ def test_tables_and_lists() -> None:
     assert "~2 min walk" in options
     assert "95% dock" in options
     assert "No station within" in options_html([], "bike")
+    assert "vf-list-grid" in options_html(
+        [{"station": STATIONS[1], "distance_m": 160.0, "probability": 0.95}], "dock", grid=True
+    )
 
 
 def test_names_from_the_feed_are_escaped() -> None:
@@ -262,36 +269,6 @@ def test_names_from_the_feed_are_escaped() -> None:
     ):
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
-
-
-@pytest.mark.parametrize(
-    ("stem", "signature"),
-    [
-        ("logo", b"\x89PNG"),  # transparent PNG: wins over logo.svg
-        ("sidebar", b"\xff\xd8\xff"),  # photos (JPEG): win over the drawings
-        ("hero", b"\xff\xd8\xff"),
-    ],
-)
-def test_bundled_pictures_are_data_uris(stem: str, signature: bytes) -> None:
-    uri = asset_uri(stem)
-
-    assert uri.startswith("data:image/")
-    assert base64.b64decode(uri.split(",", 1)[1]).startswith(signature)
-
-
-def test_a_photo_replaces_the_drawing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (tmp_path / "hero.svg").write_text("<svg/>")
-    (tmp_path / "hero.jpg").write_bytes(b"\xff\xd8photo")
-    monkeypatch.setattr(ui, "ASSETS", tmp_path)
-    asset_uri.cache_clear()
-    try:
-        uri = asset_uri("hero")
-        assert uri.startswith("data:image/jpeg;base64,")
-        assert base64.b64decode(uri.split(",", 1)[1]) == b"\xff\xd8photo"
-        with pytest.raises(FileNotFoundError, match="nothing"):
-            asset_uri("nothing")
-    finally:
-        asset_uri.cache_clear()
 
 
 def test_horizons_walks_and_bands_are_computed() -> None:

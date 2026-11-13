@@ -149,6 +149,24 @@ Artifact Registry keeps the last two images (`infra/gcp/registry_cleanup.json`):
 0.5 GB is free and the image weighs a few hundred MB. CI builds the image on
 every push and checks that both services start.
 
+## Custom domain
+
+The web app is also served at **https://veloflow.spaceh.online**, through a
+Cloud Run domain mapping: free, available in us-east1, with a certificate
+issued and renewed by Google. It is a Preview feature (no SLA, possibly some
+extra latency from far away); a global external load balancer would do the
+same for about 18 USD a month, which the free-tier rule excludes. The
+`run.app` address keeps working.
+
+| Step | Where | What |
+|---|---|---|
+| 1, once | Search Console | `gcloud domains verify spaceh.online`, then the TXT record it shows at the DNS host of `spaceh.online`, then *Verify*. Same Google account as gcloud. |
+| 2 | Laptop | `.\infra\gcp\map_domain.ps1 -WhatIf`, then `.\infra\gcp\map_domain.ps1`: creates the mapping, prints the DNS record. |
+| 3 | DNS host | `veloflow` CNAME `ghs.googlehosted.com.` (DNS only: no proxy). |
+| 4 | Laptop | `.\infra\gcp\map_domain.ps1` again, until `Ready` is `True` (certificate: 15 minutes to a few hours). |
+
+After the switch, check that a page loads and that its controls react (Streamlit talks to the server over a WebSocket).
+
 ## Getting the data on the laptop
 
 ```powershell

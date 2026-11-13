@@ -175,4 +175,4 @@ Data sources and their terms:
   [ODbL](https://opendatacommons.org/licenses/odbl/1-0/).
 - French school calendar: Ministère de l'Éducation nationale,
   [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
-- Pictures of the app: see [assets/CREDITS.md](src/veloflow/serving/assets/CREDITS.md).
+- Pictures and font of the app: see [CREDITS.md](src/veloflow/serving/static/images/CREDITS.md).

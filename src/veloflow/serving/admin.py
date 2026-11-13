@@ -9,7 +9,8 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
-from veloflow.serving.ui import DASH, TONES, icon, kpi_html, tip_html
+from veloflow.serving import theme
+from veloflow.serving.ui import DASH, TONES, stat_html, stats_html, tip_html
 
 TARGET_LABELS = {"mechanical": "Mechanical bikes", "ebike": "E-bikes", "docks": "Free docks"}
 
@@ -34,6 +35,22 @@ def _day(stamp: str | None) -> str:
     return DASH if not stamp else f"{datetime.fromisoformat(stamp):%d %b %Y %H:%M}"
 
 
+def _table_card(title: str, note: str, heads: list[str], rows: str, caption: str = "") -> str:
+    """A table in a card; a heading starting with ``#`` is a number column (right-aligned)."""
+    cells = "".join(
+        f'<th scope="col" class="r">{escape(h[1:])}</th>'
+        if h.startswith("#")
+        else f'<th scope="col">{escape(h)}</th>'
+        for h in heads
+    )
+    extra = f'<p class="vf-caption">{escape(caption)}</p>' if caption else ""
+    return (
+        f'<div class="vf-card"><div class="vf-card-title">{escape(title)}'
+        f'<small>{escape(note)}</small></div><div class="vf-table-wrap"><table class="vf-table">'
+        f"<thead><tr>{cells}</tr></thead><tbody>{rows}</tbody></table></div>{extra}</div>"
+    )
+
+
 def alerts_html(status: dict[str, Any]) -> str:
     """Alerts raised by the monitoring rules, or a line saying all checks pass."""
     found = status["alerts"]
@@ -44,36 +61,36 @@ def alerts_html(status: dict[str, Any]) -> str:
             "good",
         )
     items = "".join(f"<li>{escape(a['message'])}</li>" for a in found)
-    return (
-        f'<div class="vf-card vf-tip poor"><span class="vf-tip-icon">'
-        f"{icon('alert', 22, '#ffffff')}</span><div><b>{len(found)} alert"
-        f'{"s" if len(found) > 1 else ""}</b><ul class="vf-alerts">{items}</ul></div></div>'
-    )
+    title = f"{len(found)} alert{'s' if len(found) > 1 else ''}"
+    return tip_html(title, "", "poor").replace("<p></p>", f"<ul>{items}</ul>")
 
 
 def health_html(status: dict[str, Any], now: datetime) -> str:
     """Collector, stations and weather, as key figures."""
     c = status["collector"]
-    return (
-        '<div class="vf-kpis">'
-        + kpi_html("clock", "#6366f1", _ago(c["last_fetch"], now), "Last fetch of the feed")
-        + kpi_html(
-            "chart",
-            "#0ea5e9",
-            f"{c['fetches_ok_last_hour']} / {c['expected_last_hour']}",
-            "Usable fetches, last hour",
-            f"{c['fetches_last_hour']} archived",
-        )
-        + kpi_html(
-            "pin",
-            "#22c55e",
-            f"{c['stations_operational']:,} / {c['stations']:,}",
-            "Stations in service",
-        )
-        + kpi_html(
-            "info", "#f59e0b", _ago(status["weather"]["fetched_at"], now), "Weather snapshot"
-        )
-        + "</div>"
+    return stats_html(
+        [
+            stat_html("clock", theme.PRIMARY, _ago(c["last_fetch"], now), "Last fetch of the feed"),
+            stat_html(
+                "chart",
+                theme.COUNT_COLOURS["ebike"],
+                f"{c['fetches_ok_last_hour']} / {c['expected_last_hour']}",
+                "Usable fetches, last hour",
+                f"{c['fetches_last_hour']} archived",
+            ),
+            stat_html(
+                "pin",
+                theme.COUNT_COLOURS["docks"],
+                f"{c['stations_operational']:,} / {c['stations']:,}",
+                "Stations in service",
+            ),
+            stat_html(
+                "info",
+                theme.WARNING,
+                _ago(status["weather"]["fetched_at"], now),
+                "Weather snapshot",
+            ),
+        ]
     )
 
 
@@ -83,8 +100,9 @@ def accuracy_html(status: dict[str, Any]) -> str:
     rules = status["rules"]
     if not live["horizons"]:
         return (
-            '<div class="vf-card vf-muted">No forecast scored yet: the first ones are scored '
-            "when their target time comes (15 minutes after the first run).</div>"
+            '<div class="vf-card"><div class="vf-empty"><b>No forecast scored yet</b><span>'
+            "The first ones are scored when their target time comes (15 minutes after the "
+            "first run).</span></div></div>"
         )
     rows = []
     for horizon, figures in live["horizons"].items():
@@ -98,23 +116,29 @@ def accuracy_html(status: dict[str, Any]) -> str:
             tint = TONES["good"] if gain is not None and gain > 0 else TONES["poor"]
             rows.append(
                 f"<tr><td>{horizon} min</td><td>{TARGET_LABELS.get(target, escape(target))}</td>"
-                f'<td class="vf-fig">{_num(t["mae"])}</td>'
-                f'<td class="vf-fig">{_num(t["mae_persistence"])}</td>'
-                f'<td class="vf-fig" style="color:{tint if judged else "inherit"}">'
+                f'<td class="r vf-fig">{_num(t["mae"])}</td>'
+                f'<td class="r vf-fig">{_num(t["mae_persistence"])}</td>'
+                f'<td class="r vf-fig" style="color:{tint if judged else "inherit"}">'
                 f"<b>{DASH if gain is None else f'{gain:+.0%}'}</b></td>"
-                f'<td class="vf-fig">{_pct(t["coverage"])}</td>'
-                f'<td class="vf-fig vf-muted">{figures["pairs"]:,}</td></tr>'
+                f'<td class="r vf-fig">{_pct(t["coverage"])}</td>'
+                f'<td class="r vf-fig vf-muted">{figures["pairs"]:,}</td></tr>'
             )
-    return (
-        f'<div class="vf-card vf-table-card"><div class="vf-section-title">{icon("chart", 18)} '
-        f"Real accuracy, last {rules['live_window_hours']} h (since {_day(live['since'])} UTC)"
-        '</div><table class="vf-table"><thead><tr><th>Horizon</th><th>Count</th>'
-        "<th>MAE model</th><th>MAE persistence</th><th>Gain</th>"
-        f"<th>In {live['interval_level']:.0%} interval</th><th>Forecasts</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-        f'<p class="vf-muted">Persistence forecasts that nothing changes. A horizon is judged '
-        f"from {rules['min_pairs']:,} forecasts; intervals should cover "
-        f"{live['interval_level']:.0%} {chr(177)} {rules['coverage_tolerance']:.0%}.</p></div>"
+    return _table_card(
+        f"Real accuracy, last {rules['live_window_hours']} h",
+        f"since {_day(live['since'])} UTC",
+        [
+            "Horizon",
+            "Count",
+            "#MAE model",
+            "#MAE persistence",
+            "#Gain",
+            f"#In {live['interval_level']:.0%} interval",
+            "#Forecasts",
+        ],
+        "".join(rows),
+        f"Persistence forecasts that nothing changes. A horizon is judged from "
+        f"{rules['min_pairs']:,} forecasts; intervals should cover "
+        f"{live['interval_level']:.0%} {chr(177)} {rules['coverage_tolerance']:.0%}.",
     )
 
 
@@ -125,19 +149,18 @@ def events_html(status: dict[str, Any]) -> str:
         return ""
     rows = "".join(
         f"<tr><td>{h} min</td><td>{label}</td>"
-        f'<td class="vf-fig">{_num(f[event]["brier"], 3)}</td>'
-        f'<td class="vf-fig">{_num(f[event]["brier_persistence"], 3)}</td>'
-        f'<td class="vf-fig">{_pct(f[event]["rate"])}</td></tr>'
+        f'<td class="r vf-fig">{_num(f[event]["brier"], 3)}</td>'
+        f'<td class="r vf-fig">{_num(f[event]["brier_persistence"], 3)}</td>'
+        f'<td class="r vf-fig">{_pct(f[event]["rate"])}</td></tr>'
         for h, f in live["horizons"].items()
         for event, label in (("empty", "No bike"), ("full", "No dock"))
     )
-    return (
-        f'<div class="vf-card vf-table-card"><div class="vf-section-title">{icon("alert", 18)} '
-        'Empty and full stations</div><table class="vf-table"><thead><tr><th>Horizon</th>'
-        "<th>Event</th><th>Brier model</th><th>Brier persistence</th><th>Observed rate</th>"
-        f"</tr></thead><tbody>{rows}</tbody></table>"
-        '<p class="vf-muted">Brier score: mean squared error of the probability (lower is '
-        "better).</p></div>"
+    return _table_card(
+        "Empty and full stations",
+        "",
+        ["Horizon", "Event", "#Brier model", "#Brier persistence", "#Observed rate"],
+        rows,
+        "Brier score: mean squared error of the probability (lower is better).",
     )
 
 
@@ -146,13 +169,13 @@ def models_html(status: dict[str, Any]) -> str:
     rows = "".join(
         f"<tr><td><code>{escape(str(m['name']))}</code></td><td>{_day(m['trained_at'])}</td>"
         f"<td>{_day(m['data_start'])} {DASH} {_day(m['data_end'])}</td>"
-        f'<td class="vf-fig">{m["examples"]:,}</td><td>{_day(m["in_service_from"])}</td>'
+        f'<td class="r vf-fig">{m["examples"]:,}</td><td>{_day(m["in_service_from"])}</td>'
         f"<td>{escape(str(m['package_version']))}</td></tr>"
         for m in status["models"]
     )
-    return (
-        f'<div class="vf-card vf-table-card"><div class="vf-section-title">{icon("bulb", 18)} '
-        'Models in service</div><table class="vf-table"><thead><tr><th>Model</th>'
-        "<th>Trained</th><th>Data</th><th>Examples</th><th>In service from</th><th>Code</th>"
-        f"</tr></thead><tbody>{rows}</tbody></table></div>"
+    return _table_card(
+        "Models in service",
+        "",
+        ["Model", "Trained", "Data", "#Examples", "In service from", "Code"],
+        rows,
     )

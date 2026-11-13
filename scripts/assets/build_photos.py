@@ -3,11 +3,11 @@
 Sources, kept in ``data/assets_src/`` (ignored by Git): ``hero.webp``
 (2000 x 435) and ``sidebar.webp`` (600 x 600), two AI-generated pictures of
 the Eiffel Tower at dusk provided by Hamza Ouba (see
-``src/veloflow/serving/assets/CREDITS.md``).
+``src/veloflow/serving/static/images/CREDITS.md``).
 
     uv run python scripts/assets/build_photos.py
 
-Writes ``src/veloflow/serving/assets/hero.jpg`` (the strip behind page
+Writes ``src/veloflow/serving/static/images/hero.jpg`` (the strip behind page
 titles) and ``sidebar.jpg`` (the scene at the bottom of the sidebar). They
 win over the drawings of the same name (``serving.ui.asset_uri``). Both are
 inlined in every page as data URIs, so they are kept small (< 150 KB).
@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 SOURCES = Path("data/assets_src")
-ASSETS = Path("src/veloflow/serving/assets")
+ASSETS = Path("src/veloflow/serving/static/images")
 
 # Crops as fractions of each source (left, top, right, bottom).
 # The strip is about 4.6:1 on a 1,920 px screen (3.7:1 at 1,440 px) and is

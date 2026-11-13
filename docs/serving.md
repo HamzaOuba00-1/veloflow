@@ -162,12 +162,17 @@ uv run veloflow-app                                         # http://localhost:8
 
 `veloflow.serving.app` (Streamlit) reads the same document as the API and
 asks it the same questions (`veloflow.serving.queries`), so both always
-agree. A dark sidebar holds the logo, the navigation and the freshness of the
-data. A station's page opens from the map (select a dot, then "Open station
-page") or from the picker on the Station page.
+agree. A sticky header holds the logo, the navigation and the freshness of
+the data; a footer the links, sources and licences. The page and the station
+live in the URL (`?page=station&station=6245`), so every view can be shared
+or bookmarked; an unknown page or station falls back to the landing page and
+the station nearest Châtelet. A station's page opens from the map (select a
+dot, then "Open station page"), from the picker on the Station page, or from
+its URL.
 
 | Page | Requirement | Content |
 |---|---|---|
+| Home | | landing page: the promise, a live map of the whole network coloured by the chance of a bike at the longest horizon, why (share of stations with a bike now against the average chance at the longest horizon), the four views, how Go now works with a live example (the station nearest Châtelet), a call to action; every figure from the document |
 | Map | F1 | key figures, every station coloured by the chance to find a bike or a dock (green from 80 %, orange from 50 %, red below), the selected station's forecast beside the map (tap a station to select it), the network overview (share of stations with a bike now and expected at 15, 30, 60 minutes; bikes, e-bikes and docks available) and a tip naming the district where the risk concentrates |
 | Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state and forecasts, and walking directions |
 | At risk | F3 | the 20 stations most likely to be empty (or full), with their district, and the same stations on the map |
@@ -187,28 +192,60 @@ Go now, the chance shown is the forecast horizon nearest to the walking time
 chosen. A document from an older `veloflow-predict` without the full model
 card still renders: missing facts are left out, not guessed.
 
-### Design
+### Design system
 
-The layout follows the mockups of 12 November: a dark sidebar fading to a
-dusk gradient, white cards on a soft lavender background, an indigo accent,
-system fonts, line icons (inline SVG carried as `data:` images, since
-Streamlit's HTML sanitiser drops `<svg>` elements), probabilities with a thin
-bar and a colour, and "> 99%" or "< 1%" at the extremes, never 100 % or 0 %.
+Redesigned on 13 November 2026 (replaces the dark-sidebar layout of the
+12 November mockups): a light, minimal interface in the spirit of Apple's
+product pages, with violet as its one accent.
 
-The logo (a cyclist, white on transparent) and the favicon (the same logo
-on navy) come from the project's own design. Behind each page title and at
-the bottom of the sidebar, two AI-generated pictures of the Eiffel Tower at
-dusk, as an unlit silhouette, provided by Hamza Ouba. `scripts/assets/build_photos.py` crops and
-compresses them from their sources (kept out of Git in `data/assets_src/`);
-sources are listed in `src/veloflow/serving/assets/CREDITS.md`. Pictures are inlined
-as `data:` URIs by `asset_uri`, so they are kept small (hero about 1,800 px
-wide); a photo wins over the drawing of the same name (`hero.svg`,
-`sidebar.svg`), which remain as a fallback.
+- **Tokens** (`veloflow.serving.theme`): every colour, type size, space,
+  radius, shadow and duration is named once and written into the page as CSS
+  custom properties (`--vf-...`); the style sheet
+  (`serving/static/css/veloflow.css`) only reads them, and a test fails if it
+  uses a variable that is not a token. pydeck and Altair read the same
+  values from Python.
+- **Colours**: primary violet `#6247D4` (hover `#5238BF`, tint `#F3F0FD`),
+  aubergine ink `#2B2640` as the secondary colour (dark panel, tooltips),
+  background `#FBFAFD`, white surfaces, text `#1C1A27` / `#5F5B73` /
+  `#6F6B83`, success `#1B7A4B`, warning `#9A5807`, error `#C9373C`; counts
+  keep a hue each (mechanical violet, e-bikes blue, docks teal). Every text
+  colour reaches 4.5:1 on white and on the background (WCAG 2.2 AA, tested).
+- **Type**: Inter (variable, Latin subset, 67 KB, SIL OFL) served by the app
+  itself from `static/fonts/` (no call to a font CDN), system fonts as
+  fallback; display 40–68 px on the landing page, page titles 30–38 px,
+  section titles 26–36 px, body 16 px, captions 13 px.
+- **Space and shape**: a 4 px scale (4, 8, 12, 16, 24, 32, 48, 64, 96), one
+  control height (44 px: buttons, inputs, segmented controls), pill buttons,
+  cards with an 18 px radius and a hairline border, a 1,240 px content
+  column with fluid gutters.
+- **Components**: header with segmented navigation, page head (eyebrow,
+  title, line of context), key figures split by hairlines, count tiles with
+  their likely range, risk tiles, callouts (tips, insights, alerts), tables
+  that scroll sideways on phones, badges, empty states, the landing
+  sections. Streamlit widgets sit inside cards through keyed containers
+  (`st.container(key="card-...")`), whose class the style sheet targets;
+  cards in a row share its height.
+- **Motion**: short rises and fades (150–480 ms, no bounce), sections of the
+  landing page revealed on scroll where the browser supports scroll-driven
+  animations, a thin progress line while the app reruns, all switched off
+  when the system asks for reduced motion. Keyboard focus shows one violet
+  ring everywhere.
+- **Responsive**: desktop and laptop show the two- and three-column layouts;
+  under 1,024 px the columns stack (Streamlit alone stacks them only under
+  640 px) and the navigation moves under the brand, scrolling sideways with
+  a fade; count tiles adapt to their card's width (container query), not the
+  window's. Checked in headless Chrome at 1,440, 1,024, 768 and 390 px,
+  without any horizontal scroll.
 
-The sidebar shows its collapse button at all times (Streamlit reveals it only
-on hover), in a header row of its own; each page in the navigation, and the
-selection, spans the sidebar's full width. Streamlit's header is transparent
-but sits above the page: it lets clicks through, except on its buttons.
+Pictures live in `serving/static/images/` and are served by Streamlit's
+static file serving (`app/static/...`, turned on by `veloflow-app`), not
+inlined in every rerun. The logo (a cyclist, white on transparent) sits on a
+violet tile. Two photos are optional: `landing-ride` (story section) and
+`landing-cta` (closing call to action); until they are added, the page draws
+its fallback from live figures (`theme.image_url` returns `None`). The two
+Eiffel Tower pictures of the previous design (`hero.jpg`, `sidebar.jpg`) and
+the drawings are no longer used; credits are in
+`src/veloflow/serving/static/images/CREDITS.md`.
 
 Some elements of the mockups were left out on purpose, because no data
 supports them: an "overall accuracy" figure (none is measured; the map page
@@ -218,18 +255,14 @@ waiting time, favourites, and a dark mode. Locating the user and searching by
 address need the browser's geolocation or a geocoding service; the app
 searches by station for now.
 
-Motion is limited to a fade-in of the cards and a pulse on the live dot, and
-is switched off when the system asks for reduced motion. On phones the
-sidebar starts folded behind its menu button and the cards stack. The CSS
-targets Streamlit's stable test ids and ARIA attributes, not its generated
-class names; Streamlit's own menu and deploy button are hidden, but not the
-button that opens the sidebar (a first version hid it with the toolbar,
-leaving phones without navigation). `veloflow-app` passes the theme and turns
-off Streamlit's usage statistics.
+The CSS targets Streamlit's stable test ids, ARIA attributes and the classes
+of keyed containers, not its generated class names; Streamlit's menu,
+toolbar and sidebar are hidden. `veloflow-app` passes the theme, turns on
+static file serving and turns off Streamlit's usage statistics.
 
-Figures and cards come from `veloflow.serving.ui` (pure functions, every text
-from the feed escaped) and are tested without a browser; every page is also
-rendered in Streamlit's headless test runner. The layout was checked in a
-headless Chrome at 1600 px and 390 px wide. Streamlit is in the `app`
+Figures and components come from `veloflow.serving.ui`,
+`veloflow.serving.landing` and `veloflow.serving.admin` (pure functions,
+every text from the feed escaped) and are tested without a browser; every
+page is also rendered in Streamlit's headless test runner. Streamlit is in the `app`
 dependency group: installed on the laptop, in CI and in the app's container,
 not on the collector VM.
