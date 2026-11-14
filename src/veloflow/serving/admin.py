@@ -10,7 +10,7 @@ from html import escape
 from typing import Any
 
 from veloflow.serving import theme
-from veloflow.serving.ui import DASH, TONES, stat_html, stats_html, tip_html
+from veloflow.serving.ui import DASH, TONES, label_cells, stat_html, stats_html, tip_html
 
 TARGET_LABELS = {"mechanical": "Mechanical bikes", "ebike": "E-bikes", "docks": "Free docks"}
 
@@ -44,10 +44,12 @@ def _table_card(title: str, note: str, heads: list[str], rows: str, caption: str
         for h in heads
     )
     extra = f'<p class="vf-caption">{escape(caption)}</p>' if caption else ""
+    names = [h.removeprefix("#") for h in heads]
     return (
         f'<div class="vf-card"><div class="vf-card-title">{escape(title)}'
         f'<small>{escape(note)}</small></div><div class="vf-table-wrap"><table class="vf-table">'
-        f"<thead><tr>{cells}</tr></thead><tbody>{rows}</tbody></table></div>{extra}</div>"
+        f"<thead><tr>{cells}</tr></thead><tbody>{label_cells(rows, names)}</tbody></table></div>"
+        f"{extra}</div>"
     )
 
 

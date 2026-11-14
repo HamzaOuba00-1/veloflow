@@ -231,11 +231,25 @@ product pages, with violet as its one accent.
   when the system asks for reduced motion. Keyboard focus shows one violet
   ring everywhere.
 - **Responsive**: desktop and laptop show the two- and three-column layouts;
-  under 1,024 px the columns stack (Streamlit alone stacks them only under
-  640 px) and the navigation moves under the brand, scrolling sideways with
-  a fade; count tiles adapt to their card's width (container query), not the
-  window's. Checked in headless Chrome at 1,440, 1,024, 768 and 390 px,
-  without any horizontal scroll.
+  from 768 to 1,023 px the columns stack (Streamlit alone stacks them only
+  under 640 px) and, on tablets, the navigation moves under the brand; count
+  tiles adapt to their card's width (container query), not the window's.
+- **Phones (under 768 px)**: an app layout, not a shrunk desktop. A 56 px
+  header (brand, freshness, a round "More" menu holding Admin, About and the
+  source code) and a tab bar fixed to the bottom of the screen for the five
+  main pages (Home, Map, Go now, At risk, Station), with icons; both respect
+  the safe areas (notch, home indicator). Controls are full width with equal
+  segments; every touch target is at least 44 px (also on any touch screen,
+  `pointer: coarse`); select boxes use 16 px text so iOS does not zoom on
+  focus; maps are shorter (at most 58 % of the screen, so the page still
+  scrolls under the finger) except in full screen; tables become one card per
+  row with each value beside its column's name; At risk shows its map before
+  the ranking; three key figures share one row. Hover effects only exist on
+  devices that can hover; a touch gives a pressed state. Phones held
+  sideways keep a one-line header. Checked with Playwright (touch emulation)
+  at 320 x 568, 375 x 667, 390 x 844, 430 x 932, 667 x 375, 844 x 390,
+  768 x 1024 and 1024 x 768: no horizontal overflow, no clipped text, no
+  touch target under 44 px; the desktop is unchanged.
 
 Pictures live in `serving/static/images/` and are served by Streamlit's
 static file serving (`app/static/...`, turned on by `veloflow-app`), not

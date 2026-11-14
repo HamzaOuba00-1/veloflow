@@ -65,6 +65,7 @@ from veloflow.serving.ui import (
     CENTRE,
     COUNT_COLOURS,
     FAVICON,
+    GITHUB,
     GOOD,
     RED,
     WALK_M_PER_MIN,
@@ -113,6 +114,18 @@ PAGES = {
     "About": "about",
 }
 SLUGS = {slug: label for label, slug in PAGES.items()}
+# Icons of the navigation: shown in the phone's bottom tab bar, hidden on desktop.
+NAV_ICONS = {
+    "Home": ":material/home:",
+    "Map": ":material/map:",
+    "Go now": ":material/near_me:",
+    "At risk": ":material/warning:",
+    "Station": ":material/location_on:",
+    "Admin": ":material/monitoring:",
+    "About": ":material/info:",
+}
+# On phones the tab bar holds the first five pages; these open from the "More" menu.
+SECONDARY_PAGES = ("Admin", "About")
 NEEDS: dict[str, Need] = {"Bike": "bike", "Dock": "dock"}
 WALK_LIMITS_MIN = (5, 10, 15)  # walking-time choices; distances follow from WALK_M_PER_MIN
 TOP_AT_RISK = 20  # stations listed on the At risk page
@@ -129,6 +142,11 @@ THEME = {
     "textColor": theme.TEXT,
     "font": "sans-serif",
 }
+
+
+def page_now(state: Any) -> str:
+    """The page being shown (set by the navigation, a button or the URL)."""
+    return str(state.get("page", "Home"))
 
 
 def _deck(
@@ -395,10 +413,18 @@ def render() -> None:
 
     def go(page: str) -> Callable[[], None]:
         # A callback: it runs before the navigation radio (key "page") is
-        # drawn, the only moment Streamlit lets the page change.
-        return lambda: state.update(page=page)
+        # drawn, the only moment Streamlit lets the page change. It also
+        # closes the phone's "More" menu, which would otherwise stay open.
+        def change() -> None:
+            state["page"] = page
+            if state.get("more"):
+                state["more"] = False
 
-    # Header: brand, navigation, freshness.
+        return change
+
+    # Header: brand, navigation, freshness. On phones (style sheet) the
+    # navigation becomes a tab bar at the bottom of the screen and the pages it
+    # leaves out open from the "More" menu beside the freshness pill.
     with st.container(key="vf-header"):
         brand, nav, live = st.columns([1, 4, 1], vertical_alignment="center", gap="small")
         brand.button("VéloFlow", key="brand", on_click=go("Home"))
@@ -408,8 +434,28 @@ def render() -> None:
             key="page",
             horizontal=True,
             label_visibility="collapsed",
+            format_func=lambda p: f"{NAV_ICONS[p]} {p}",
         )
-        live.html(live_status_html(document, status, age))
+        with live, st.container(horizontal=True, key="header-end", gap="small"):
+            st.html(live_status_html(document, status, age))
+            with st.popover(
+                "More",
+                icon=":material/more_horiz:",
+                key="more",
+                # tinted while one of its pages is shown
+                type="primary" if page_now(state) in SECONDARY_PAGES else "secondary",
+                on_change="rerun",  # its open state lives in state["more"]: go() closes it
+            ):
+                for label in SECONDARY_PAGES:
+                    st.button(
+                        label,
+                        icon=NAV_ICONS[label],
+                        key=f"more-{PAGES[label]}",
+                        on_click=go(label),
+                        type="primary" if page_now(state) == label else "secondary",
+                        width="stretch",
+                    )
+                st.link_button("Source code", GITHUB, icon=":material/code:", width="stretch")
 
     page = state["page"]
     query = {"page": PAGES[page]}

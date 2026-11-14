@@ -103,7 +103,8 @@ TOKENS: dict[str, str] = {
     # layout
     "content": "1240px",
     "gutter": "clamp(20px, 4vw, 40px)",
-    "header-h": "64px",
+    "header-h": "64px",  # 56 px on phones (style sheet)
+    "tabbar-h": "64px",  # phones: the bottom tab bar
     "control-h": "44px",  # buttons, inputs, segmented controls: one height
     "control-h-sm": "36px",
     # shape

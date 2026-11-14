@@ -81,6 +81,25 @@ def test_the_logo_opens_the_landing_page(page: AppTest) -> None:
     assert page.session_state["page"] == "Home"
 
 
+def test_the_more_menu_opens_the_secondary_pages_and_closes(page: AppTest) -> None:
+    """On phones, Admin and About sit in the "More" menu, which closes once used."""
+    page.session_state["more"] = True  # the menu is open
+    page.button(key="more-admin").click().run()
+
+    assert page.session_state["page"] == "Admin"
+    assert page.session_state["more"] is False
+    page.button(key="more-about").click().run()
+    assert page.session_state["page"] == "About"
+
+
+def test_the_navigation_carries_an_icon_per_page(page: AppTest) -> None:
+    from veloflow.serving.app import NAV_ICONS, SECONDARY_PAGES
+
+    assert set(NAV_ICONS) == set(PAGES)
+    assert len(PAGES) - len(SECONDARY_PAGES) == 5  # the phone's tab bar holds five
+    assert all(":material/" in option for option in nav(page).options)
+
+
 def test_landing_buttons_open_their_pages(page: AppTest) -> None:
     page.button(key="hero-map").click().run()
     assert page.session_state["page"] == "Map"

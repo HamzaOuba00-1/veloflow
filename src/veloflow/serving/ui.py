@@ -9,6 +9,7 @@ no icon font. Pictures are served from ``static/images`` (see ``theme``).
 """
 
 import base64
+import re
 from datetime import datetime
 from html import escape
 from typing import Any
@@ -487,10 +488,29 @@ def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], horizon: str, ev
     return (
         f'<div class="vf-card"><div class="vf-card-title">Top {len(ranked)} at-risk stations'
         f'<small>{event.capitalize()} in {horizon} min</small></div><div class="vf-table-wrap">'
-        '<table class="vf-table"><thead><tr><th scope="col">#</th><th scope="col">Station</th>'
-        f'<th scope="col">District</th><th scope="col" class="r">Chance</th></tr></thead>'
+        '<table class="vf-table vf-rank"><thead><tr><th scope="col">#</th>'
+        '<th scope="col">Station</th><th scope="col">District</th>'
+        '<th scope="col" class="r">Chance</th></tr></thead>'
         f"<tbody>{rows}</tbody></table></div></div>"
     )
+
+
+def label_cells(rows: str, heads: list[str]) -> str:
+    """Give every ``<td>`` of ``rows`` its column's name (``data-label``).
+
+    On phones the style sheet shows each row as a card, every value beside the
+    name of its column.
+    """
+
+    def label_row(row: re.Match[str]) -> str:
+        names = iter(heads)
+        return re.sub(
+            r"<td(?=[ >])",
+            lambda _: f'<td data-label="{escape(next(names, ""), quote=True)}"',
+            row.group(0),
+        )
+
+    return re.sub(r"<tr>.*?</tr>", label_row, rows, flags=re.S)
 
 
 def options_html(options: list[dict[str, Any]], need: Need, *, grid: bool = False) -> str:
