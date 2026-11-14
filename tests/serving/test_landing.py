@@ -82,7 +82,10 @@ def test_story_falls_back_to_live_figures(tmp_path: Path, monkeypatch: pytest.Mo
 
     (tmp_path / "images" / "landing-ride.webp").write_bytes(b"RIFF")
     (tmp_path / "images" / "landing-cta.webp").write_bytes(b"RIFF")
-    assert "app/static/images/landing-ride.webp" in story_html(STATIONS)
+    with_photo = story_html(STATIONS)
+    assert "app/static/images/landing-ride.webp" in with_photo
+    assert "IN 40 MIN" in with_photo  # live figures written over the photo
+    assert "vf-compare on-photo" in with_photo
     assert "app/static/images/landing-cta.webp" in cta_background_html()
 
 

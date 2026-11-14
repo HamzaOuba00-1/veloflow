@@ -154,18 +154,20 @@ def story_html(stations: list[dict[str, Any]]) -> str:
     now_share = trend[0][1] if trend else 0.0
     later_label, later_share = trend[-1] if len(trend) > 1 else ("", 0.0)
     photo = theme.image_url("landing-ride")
-    if photo:
-        media = (
-            f'<img src="{photo}" alt="A rider taking a Vélib\' bike from a station in Paris" '
-            'loading="lazy">'
-        )
-    else:
-        media = (
-            '<div class="vf-compare"><div><small>NOW</small>'
-            f"<b>{percent(now_share)}</b><span>of stations have a bike</span></div>"
-            f"<div><small>IN {escape(later_label.upper())}</small><b>{percent(later_share)}</b>"
-            "<span>average chance of finding one</span></div></div>"
-        )
+    # The figures are always the live ones, written over the photo when there is
+    # one (the photo carries no figure of its own), on the drawn panels otherwise.
+    figures = (
+        f'<div class="vf-compare{" on-photo" if photo else ""}"><div><small>NOW</small>'
+        f"<b>{percent(now_share)}</b><span>of stations have a bike</span></div>"
+        f"<div><small>IN {escape(later_label.upper())}</small><b>{percent(later_share)}</b>"
+        "<span>average chance of finding one</span></div></div>"
+    )
+    media = (
+        f'<img src="{photo}" alt="A rider taking a Vélib\' bike from a station in Paris" '
+        f'loading="lazy">{figures}'
+        if photo
+        else figures
+    )
     return (
         '<section class="vf-section vf-reveal" aria-labelledby="vf-story"><div class="vf-story">'
         '<div><div class="vf-eyebrow">Why VéloFlow</div>'

@@ -588,6 +588,8 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 .vf-compare > div { display: flex; flex-direction: column; justify-content: flex-end;
   padding: var(--vf-space-6); gap: var(--vf-space-1); }
 .vf-compare > div + div { background: linear-gradient(160deg, rgba(98, 71, 212, .9), rgba(74, 49, 173, .95)); }
+/* Over the photo: its own two halves are the panels; only the text is drawn. */
+.vf-compare.on-photo > div + div { background: none; }
 .vf-compare small { font-size: var(--vf-text-caption); font-weight: 600; letter-spacing: .02em;
   color: rgba(255, 255, 255, .72); }
 .vf-compare b { font-size: clamp(2rem, 1.4rem + 2vw, 3rem); font-weight: 750; letter-spacing: -.04em;

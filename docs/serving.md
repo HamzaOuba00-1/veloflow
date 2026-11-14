@@ -241,8 +241,10 @@ Pictures live in `serving/static/images/` and are served by Streamlit's
 static file serving (`app/static/...`, turned on by `veloflow-app`), not
 inlined in every rerun. The logo (a cyclist, white on transparent) sits on a
 violet tile. Two photos are optional: `landing-ride` (story section) and
-`landing-cta` (closing call to action); until they are added, the page draws
-its fallback from live figures (`theme.image_url` returns `None`). The two
+`landing-cta` (closing call to action); without them the page draws its own
+panels (`theme.image_url` returns `None`). The story's figures (stations with
+a bike now, average chance at the longest horizon) are always the live ones,
+written over the photo: the photo carries no figure. The two
 Eiffel Tower pictures of the previous design (`hero.jpg`, `sidebar.jpg`) and
 the drawings are no longer used; credits are in
 `src/veloflow/serving/static/images/CREDITS.md`.
