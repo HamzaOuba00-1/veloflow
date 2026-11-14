@@ -143,6 +143,7 @@ Docker:
 | Memory | 512 MiB | 1 GiB | Streamlit, pandas and pyarrow need more than FastAPI |
 | Instances | 0 to 1 | 0 to 1 | Free tier: nothing runs without visitors; the first visit after a quiet period waits for a cold start |
 | Access | public | public | The data is open; no account needed |
+| Identity | `veloflow-run` | `veloflow-run` | A service account with **no role**: the services only read a public document. Without it, Cloud Run would run them as the Compute Engine default account, which holds Editor on the project |
 | Other | | session affinity, 1 h timeout | A Streamlit session is a WebSocket held by one instance |
 
 Artifact Registry keeps the last two images (`infra/gcp/registry_cleanup.json`):

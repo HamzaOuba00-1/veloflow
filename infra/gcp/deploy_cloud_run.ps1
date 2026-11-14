@@ -26,11 +26,16 @@
 param(
     [string]$Project = "veloflow-513808",
     [string]$Region = "us-east1",
-    [string]$Forecasts = "https://storage.googleapis.com/veloflow-forecasts-513808/forecasts.json"
+    [string]$Forecasts = "https://storage.googleapis.com/veloflow-forecasts-513808/forecasts.json",
+    [string]$Runtime = "veloflow-run"
 )
 
 $ErrorActionPreference = "Stop"
 $Repository = "cloud-run-source-deploy"  # created by gcloud on the first --source deploy
+# Identity of both services: a service account with no role at all. They only
+# read a public document; without it Cloud Run would use the Compute Engine
+# default account, which holds Editor on the whole project.
+$RuntimeEmail = "$Runtime@$Project.iam.gserviceaccount.com"
 
 function Invoke-Gcloud {
     # gcloud is a PowerShell script on Windows: keep -WhatIf out of it.
@@ -47,13 +52,24 @@ if (-not (Test-Path Dockerfile)) { throw "Run this script from the repository ro
 
 $common = @(
     "--project=$Project", "--region=$Region", "--allow-unauthenticated",
-    "--min-instances=0", "--max-instances=1", "--cpu=1",
+    "--min-instances=0", "--max-instances=1", "--cpu=1", "--service-account=$RuntimeEmail",
     "--set-env-vars=VELOFLOW_FORECASTS=$Forecasts", "--quiet"
 )
 
 Step "enable Cloud Run, Cloud Build and Artifact Registry" {
     Invoke-Gcloud services enable run.googleapis.com cloudbuild.googleapis.com `
         artifactregistry.googleapis.com --project=$Project
+}
+
+$sa = gcloud iam service-accounts list --project=$Project --filter="email=$RuntimeEmail" `
+    --format="value(email)"
+if ($sa) {
+    Write-Host "Service account $RuntimeEmail already exists (no role)."
+} else {
+    Step "create service account $RuntimeEmail, with no role" {
+        Invoke-Gcloud iam service-accounts create $Runtime --project=$Project `
+            --display-name="VeloFlow API and app on Cloud Run: no permission"
+    }
 }
 
 Step "build the image and deploy veloflow-api" {
