@@ -832,7 +832,11 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
   .stApp .st-key-more button [data-testid="stMarkdownContainer"] { position: absolute; width: 1px;
     height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .stApp .st-key-more button > div > div[aria-hidden="true"] { display: none !important; }
-  .stApp .st-key-more button > div { justify-content: center; }
+  /* Streamlit gives the icon a 16 px box (22 px glyph overflows right and down)
+     and a -5 px margin: size the box to the glyph so it sits in the centre. */
+  .stApp .st-key-more button > div { justify-content: center; margin: 0 !important; }
+  .stApp .st-key-more button [data-testid="stIconMaterial"] { width: 22px; height: 22px;
+    line-height: 22px; justify-content: center; align-items: center; }
   /* on Admin or About, the menu that leads there shows it */
   .stApp .st-key-more [data-testid="stPopoverButton"][kind="primary"] {
     background: var(--vf-color-primary-light) !important; border-color: var(--vf-color-primary-soft) !important; }
