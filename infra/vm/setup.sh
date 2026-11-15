@@ -39,6 +39,17 @@ apt-get update -qq
 # libgomp1: OpenMP runtime that LightGBM's compiled library loads (veloflow-predict).
 apt-get install -y -qq git curl ca-certificates libgomp1 >/dev/null
 
+log "Automatic security updates (unattended-upgrades)"
+# Debian's default policy: security and point-release updates of the stable
+# archive, applied daily. No automatic reboot: a kernel update waits for a
+# manual reboot (see /var/run/reboot-required), so the collector never stops
+# on its own.
+apt-get install -y -qq unattended-upgrades >/dev/null
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'APT'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT
+
 log "uv (installed once, system-wide)"
 if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh \

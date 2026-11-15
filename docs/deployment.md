@@ -19,6 +19,7 @@ described by files in this repository.
 | `infra/vm/veloflow-predict.timer` | Runs it every 10 minutes (minutes 2, 12, 22…) |
 | `infra/gcp/create_forecast_bucket.ps1` | Creates the public bucket and the VM's service account (run from the laptop) |
 | `Dockerfile`, `infra/gcp/deploy_cloud_run.ps1` | Image of the API and the app, built by Cloud Build and deployed on Cloud Run |
+| `infra/gcp/harden_project.ps1` | Removes Editor from the Compute Engine default account and closes SSH to the internet (run once from the laptop) |
 
 ## VM settings and why
 
@@ -29,6 +30,8 @@ described by files in this repository.
 | Network | Standard tier, ephemeral IP | Needed to reach the feed; no charge for the IP on the free tier |
 | Identity | Service account `veloflow-publisher`, scope Cloud Storage only | Its one role, `objectUser` on the forecast bucket, lets the VM replace `forecasts.json` and nothing else; no key file exists |
 | Protection | Deletion protection | The disk holds the only copy of the raw archive |
+| SSH | Port 22 open to the IAP range `35.235.240.0/20` only (`default-allow-ssh` and `default-allow-rdp` disabled) | Nobody on the internet can reach the SSH server; access goes through Google sign-in, hence `--tunnel-through-iap` on every `gcloud compute ssh` / `scp` |
+| Updates | `unattended-upgrades`, daily, no automatic reboot | Security fixes without a manual step; the collector never restarts on its own |
 | Swap | 1 GB file, `vm.swappiness=10` | 1 GB of RAM, ~600 MB available after the OS |
 
 ## Layout on the VM
@@ -54,8 +57,8 @@ forecast: measured peak 360 MB, 25 s and 16 s of CPU for 1,496 stations). The VM
 From the laptop, once the changes are pushed to `main`:
 
 ```powershell
-gcloud compute scp infra/vm/setup.sh veloflow-collector:setup.sh
-gcloud compute ssh veloflow-collector --command="sudo bash setup.sh"
+gcloud compute scp --tunnel-through-iap infra/vm/setup.sh veloflow-collector:setup.sh
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="sudo bash setup.sh"
 ```
 
 On Windows, `gcloud compute scp` uses PuTTY's `pscp`, which does not expand
@@ -69,15 +72,15 @@ the collector.
 
 ```powershell
 # Service state and the last log lines
-gcloud compute ssh veloflow-collector --command="systemctl status veloflow-collector --no-pager"
-gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-collector -n 30 --no-pager"
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="systemctl status veloflow-collector --no-pager"
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="journalctl -u veloflow-collector -n 30 --no-pager"
 
 # Next and last runs of the scheduled jobs
-gcloud compute ssh veloflow-collector --command="systemctl list-timers 'veloflow-*' --no-pager"
-gcloud compute ssh veloflow-collector --command="journalctl -u veloflow-weather -n 5 --no-pager"
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="systemctl list-timers 'veloflow-*' --no-pager"
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="journalctl -u veloflow-weather -n 5 --no-pager"
 
 # Data on disk, memory, disk space
-gcloud compute ssh veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="du -sh /var/lib/veloflow/*; free -m; df -h /"
 ```
 
 ## Live forecasts
@@ -114,8 +117,8 @@ After each training on the laptop, copy the model and its card (when, on what
 data, which version of the code; read with the model) to the VM:
 
 ```powershell
-gcloud compute scp data/models/lightgbm.pkl data/models/lightgbm.json veloflow-collector:.
-gcloud compute ssh veloflow-collector --command="sudo install -o veloflow -g veloflow -m 644 lightgbm.pkl lightgbm.json /var/lib/veloflow/models/ && rm lightgbm.pkl lightgbm.json"
+gcloud compute scp --tunnel-through-iap data/models/lightgbm.pkl data/models/lightgbm.json veloflow-collector:.
+gcloud compute ssh --tunnel-through-iap veloflow-collector --command="sudo install -o veloflow -g veloflow -m 644 lightgbm.pkl lightgbm.json /var/lib/veloflow/models/ && rm lightgbm.pkl lightgbm.json"
 ```
 
 Until a model is there, the job is skipped (`ConditionPathExists`), not failed.
@@ -143,7 +146,8 @@ Docker:
 | Memory | 512 MiB | 1 GiB | Streamlit, pandas and pyarrow need more than FastAPI |
 | Instances | 0 to 1 | 0 to 1 | Free tier: nothing runs without visitors; the first visit after a quiet period waits for a cold start |
 | Access | public | public | The data is open; no account needed |
-| Identity | `veloflow-run` | `veloflow-run` | A service account with **no role**: the services only read a public document. Without it, Cloud Run would run them as the Compute Engine default account, which holds Editor on the project |
+| Identity | `veloflow-run` | `veloflow-run` | A service account with **no role**: the services only read a public document. Without it, Cloud Run would run them as the Compute Engine default account, which Google creates with Editor on the project |
+| Build identity | Compute Engine default account, `roles/run.builder` only | same image | Cloud Build builds the image as this account; Google creates it with Editor on the project, removed by `harden_project.ps1` |
 | Other | | session affinity, 1 h timeout | A Streamlit session is a WebSocket held by one instance |
 
 Artifact Registry keeps the last two images (`infra/gcp/registry_cleanup.json`):
@@ -218,8 +222,9 @@ never logged. Template: `infra/vm/veloflow.env.example`.
 
 ## Known limits
 
-- Port 22 is open to the internet on the default network (key-based SSH only).
-  Planned hardening: SSH through IAP and Secure Boot.
+- Kernel updates are installed automatically but wait for a manual reboot:
+  `gcloud compute ssh --tunnel-through-iap veloflow-collector --command="cat /var/run/reboot-required 2>/dev/null || echo none"`.
+  Planned hardening: Secure Boot.
 - The external IP may change after a VM restart; `gcloud compute ssh` finds the
   VM by name, so nothing depends on it.
 - The model is copied by hand after each training; the API's `/health` shows

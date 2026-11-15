@@ -47,7 +47,7 @@ $LocalRoot = [System.IO.Path]::GetFullPath($LocalRoot)
 # No double quotes inside: Windows PowerShell 5.1 mangles them when passing
 # arguments to native programs. Dataset names contain no spaces.
 $command = "cd $RemoteRoot && for d in $($Datasets -join ' '); do [ -d `$d ] && find `$d -type f -printf '%p\t%s\n'; done; true"
-$lines = Invoke-Gcloud compute ssh $Name --zone=$Zone --command=$command
+$lines = Invoke-Gcloud compute ssh $Name --zone=$Zone --tunnel-through-iap --command=$command
 if ($LASTEXITCODE -ne 0) { throw "Listing the files on the VM failed." }
 
 $remoteFiles = @(
@@ -72,7 +72,7 @@ foreach ($file in $remoteFiles) {
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $local) | Out-Null
     $partial = "$local.part"
-    Invoke-Gcloud compute scp --zone=$Zone "${Name}:$RemoteRoot/$($file.Path)" $partial
+    Invoke-Gcloud compute scp --zone=$Zone --tunnel-through-iap "${Name}:$RemoteRoot/$($file.Path)" $partial
     if ($LASTEXITCODE -ne 0) { throw "Download of $($file.Path) failed." }
     Move-Item -LiteralPath $partial -Destination $local -Force
     $downloaded++
