@@ -8,16 +8,23 @@ docks there will be in 15, 30 and 60 minutes, with 80 % intervals and
 calibrated probabilities that the station will be empty or full. Live, updated
 every 10 minutes, on free-tier infrastructure.
 
-**Live:** [web app](https://veloflow-app-235721892563.us-east1.run.app) ·
+**Live:** [web app](https://veloflow.spaceh.online) ·
 [API docs](https://veloflow-api-235721892563.us-east1.run.app/docs) ·
 [service health](https://veloflow-api-235721892563.us-east1.run.app/status)
 (the services sleep when unused: the first visit takes a few seconds)
 
-![Map of every station with the chance to find a bike in 15 minutes](docs/images/map.png)
+![Home page: the whole network live, with the average chance of finding a bike](docs/images/home.webp)
 
-| Go now? | At risk | Station | Admin |
-|---|---|---|---|
-| ![Go now](docs/images/go-now.png) | ![At risk](docs/images/at-risk.png) | ![Station](docs/images/station.png) | ![Admin](docs/images/admin.png) |
+| Map | Go now? |
+|---|---|
+| ![Map of every station with the chance to find a bike](docs/images/map.webp) | ![Nearest stations with a bike when you arrive](docs/images/go-now.webp) |
+| **At risk** | **Station** |
+| ![Stations most likely to be empty or full within the hour](docs/images/at-risk.webp) | ![One station: forecasts at 15, 30 and 60 minutes with intervals](docs/images/station.webp) |
+| **Admin** | **On a phone** |
+| ![Collector health, model in service and live accuracy](docs/images/admin.webp) | <img src="docs/images/phone-go-now.webp" alt="Go now on a phone, with the bottom tab bar" width="260"> |
+
+Screenshots of the live app, taken by `scripts/assets/screenshots.py`; every
+figure on them comes from the forecast document of that moment.
 
 ## What it answers
 
@@ -43,7 +50,7 @@ flowchart LR
   end
   P -- "forecasts.json<br/>(gzip, no-cache)" --> GCS[("Cloud Storage<br/>public object")]
   GCS --> API["FastAPI<br/>(Cloud Run)"]
-  GCS --> APP["Streamlit app<br/>(Cloud Run)"]
+  GCS --> APP["Streamlit app<br/>(Cloud Run,<br/>veloflow.spaceh.online)"]
   RAW -. "pull_data.ps1" .-> LAP["laptop: Parquet, EDA,<br/>backtest, training"]
   LAP -. "copy model" .-> M
 ```
@@ -69,6 +76,19 @@ flowchart LR
 Cards and status: [model card](docs/cards/model_card.md) ·
 [data card](docs/cards/data_card.md) ·
 [Definition of Done, box by box](docs/definition_of_done.md).
+
+## Tech stack
+
+| Layer | Tools | Role in VéloFlow |
+|---|---|---|
+| Data | Python 3.12, Polars, Parquet (zstd), Pydantic, httpx | Collect the feed every 30 s, validate it, store a raw archive and a daily columnar layer |
+| Machine learning | LightGBM, scikit-learn | Gradient-boosted forecasts per horizon, isotonic calibration, split-conformal intervals |
+| Evaluation | Own rolling-origin backtest | Persistence and profile baselines, look-ahead test, MAE, Brier, calibration, coverage |
+| Serving | FastAPI, Uvicorn, Streamlit, pydeck, Altair | REST API with OpenAPI docs; web app with maps and charts, desktop and phone layouts |
+| Cloud (Google Cloud) | Compute Engine, Cloud Storage, Cloud Run, Cloud Build, Artifact Registry, IAM, Identity-Aware Proxy | VM running 24/7, public forecast document, two services scaled to zero, image built from the sources, one service account per job, SSH without an open port |
+| Delivery | Docker, GitHub Actions, uv, systemd | One image for the API and the app, CI on every push, locked dependencies, sandboxed services on the VM |
+| Quality | pytest, mypy `--strict`, ruff, pre-commit | Tests and static checks run locally and in CI |
+| Operations | healthchecks.io, Cloud Billing budget, custom domain with managed TLS | Alerts when a job stops, cost guard at 1 USD a month, `veloflow.spaceh.online` |
 
 ## Results
 
@@ -96,7 +116,7 @@ Backtest on 9-10 November 2026 (rolling origin, frozen stations left out):
 - In production: 1,496 stations forecast in 25 s on the VM (360 MB peak);
   the API answers in 10-70 ms; the document weighs 134 KB gzipped.
 
-Real accuracy since the deployment is on the [Admin page](https://veloflow-app-235721892563.us-east1.run.app):
+Real accuracy since the deployment is on the [Admin page](https://veloflow.spaceh.online/?page=admin):
 it is measured continuously, not copied here, so it never goes stale.
 
 ## Quick start
@@ -125,15 +145,24 @@ uv run veloflow-predict --data-dir data           # forecast now -> data/serving
 
 - One installable package (`src/veloflow`); the collector, the API, the app
   and the scripts only import it.
-- 374 tests, 98 % coverage, `mypy --strict`, ruff, 12 pre-commit hooks; CI
-  runs them on every push and builds the serving image.
+- 387 tests, 98.7 % coverage (lines and branches), `mypy --strict`, ruff,
+  12 pre-commit hooks; CI runs them on every push and builds the serving image.
 - Degraded cases tested: feed down, partial or malformed response, unknown or
   vanished station, broken or unreachable forecast document, failed monitoring.
 - Infrastructure as code (`infra/`): VM setup, systemd units with memory caps
-  and sandboxing, bucket, Cloud Run deployment. Least privilege: the VM's
-  service account can write one bucket; no key file exists; secrets stay in
-  the VM's environment file.
-- Free tier: e2-micro VM, Cloud Storage in us-east1, Cloud Run scaled to zero.
+  and sandboxing, bucket, Cloud Run deployment, custom domain, project
+  hardening. Every script has a `-WhatIf` dry run and can be run twice.
+- Least privilege, one identity per job:
+  - the VM can replace one file in one bucket, and nothing else;
+  - the API and the app run as a service account with no role at all;
+  - the image build holds only the Cloud Run builder role;
+  - no key file exists; secrets stay in the VM's environment file.
+- Network: SSH only through Identity-Aware Proxy (port 22 closed to the
+  internet); automatic security updates on the VM.
+- Cost: built for the free tier (e2-micro VM, Cloud Storage and Cloud Run in
+  us-east1, services scaled to zero), with a 1 USD budget alert. Billing
+  checked at 0.00 USD on 10 November 2026, before Cloud Run; next check in
+  early December.
 
 ## Repository
 
