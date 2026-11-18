@@ -724,6 +724,21 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
   .vf-hero-text { padding-top: var(--vf-space-7); }
 }
 
+/* At risk, list and map side by side: the list is exactly as tall as the map
+   column beside it and scrolls inside its card. Its column is taken out of the
+   flow, so the map alone sets the height of the row. */
+@media (min-width: 1024px) {
+  [data-testid="stColumn"]:has(.vf-risk-list) { position: relative; }
+  [data-testid="stColumn"]:has(.vf-risk-list) > [data-testid="stVerticalBlock"] {
+    position: absolute; inset: 0; }
+  [data-testid="stColumn"]:has(.vf-risk-list) [data-testid="stElementContainer"],
+  [data-testid="stColumn"]:has(.vf-risk-list) .stHtml { height: 100%; }
+  .vf-risk-list { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .vf-risk-list .vf-table-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .vf-risk-list thead th { position: sticky; top: 0; z-index: 1;
+    background: var(--vf-color-surface); }
+}
+
 /* Tablets: header on two lines, brand and status, then the navigation.
    (Phones held sideways, under 500 px high, keep the one-line header.) */
 @media (min-width: 768px) and (max-width: 900px) and (min-height: 501px) {

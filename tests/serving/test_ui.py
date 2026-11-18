@@ -245,6 +245,7 @@ def test_page_parts() -> None:
 def test_tables_and_lists() -> None:
     table = risk_table_html([(0.9, STATIONS[0])], "15", "empty")
     assert "Top 1 at-risk stations" in table
+    assert "vf-risk-list" in table  # the style sheet sizes it to the map and scrolls it
     assert "Paris 4e" in table
     assert "No station is likely to be full" in risk_table_html([], "30", "full")
     options = options_html(

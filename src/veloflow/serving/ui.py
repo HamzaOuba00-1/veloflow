@@ -473,7 +473,8 @@ def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], horizon: str, ev
         for i, (p, s) in enumerate(ranked, start=1)
     )
     return (
-        f'<div class="vf-card"><div class="vf-card-title">Top {len(ranked)} at-risk stations'
+        f'<div class="vf-card vf-risk-list"><div class="vf-card-title">'
+        f"Top {len(ranked)} at-risk stations"
         f'<small>{event.capitalize()} in {horizon} min</small></div><div class="vf-table-wrap">'
         '<table class="vf-table vf-rank"><thead><tr><th scope="col">#</th>'
         '<th scope="col">Station</th><th scope="col">District</th>'
