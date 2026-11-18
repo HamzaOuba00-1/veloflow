@@ -424,21 +424,6 @@ def now_compact_html(station: dict[str, Any]) -> str:
     return f'<div class="vf-minis">{tiles}</div>'
 
 
-def horizon_table_html(station: dict[str, Any]) -> str:
-    """Mechanical / e-bikes / docks forecast at every horizon of the station."""
-    hs = station_horizons(station)
-    cells = "".join(
-        f'<div class="vf-hcell"><div class="vf-hcell-h">In {h} min</div><div class="vf-hcell-v">'
-        f"{station['forecasts'][h]['mechanical']:.0f} / {station['forecasts'][h]['ebike']:.0f} / "
-        f"{station['forecasts'][h]['docks']:.0f}</div></div>"
-        for h in hs
-    )
-    return (
-        f'<div class="vf-subtitle"><b>Next {" / ".join(hs)} min</b>'
-        f'<small>mechanical / e-bikes / docks</small></div><div class="vf-hgrid">{cells}</div>'
-    )
-
-
 def tip_html(title: str, text: str, tone_name: str = "info") -> str:
     """A callout: ``info`` (violet), ``good``, ``fair`` or ``poor``."""
     mark = icon("check", 18, "#ffffff") if tone_name == "good" else icon("bulb", 18, "#ffffff")

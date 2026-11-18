@@ -21,7 +21,6 @@ from veloflow.serving.ui import (
     count_cards_html,
     directions_url,
     district,
-    horizon_table_html,
     horizons,
     icon,
     insight,
@@ -208,7 +207,6 @@ def test_cards_render_the_figures() -> None:
     assert "+0 in 15 min" in tiles  # e-bikes 1 and 1
     assert "-1 in 15 min" in tiles  # docks 5 now, 4 forecast
     assert now_compact_html(STATIONS[0]).count('vf-mini"') == 3
-    assert "3 / 1 / 4" in horizon_table_html(STATIONS[0])
     assert "Paris 4e · 120 m" in station_head_html(STATIONS[0], " · 120 m")
     assert "<h1 " in station_head_html(STATIONS[0], xl=True)
 

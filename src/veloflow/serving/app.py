@@ -77,7 +77,6 @@ from veloflow.serving.ui import (
     directions_url,
     empty_html,
     hex_colour,
-    horizon_table_html,
     horizons,
     insight,
     legend_html,
@@ -824,7 +823,7 @@ def _station(
                 highlight=station,
                 faded=True,
             ),
-            height=470,
+            height=400,  # as tall as the forecast card beside it
         )
     with forecast, st.container(key="card-station-forecast"):
         horizon = st.radio(
@@ -834,11 +833,7 @@ def _station(
             key="station_h",
             format_func=lambda h: f"In {h} min",
         )
-        st.html(
-            count_cards_html(station, horizon)
-            + risk_cards_html(station, horizon)
-            + horizon_table_html(station)
-        )
+        st.html(count_cards_html(station, horizon) + risk_cards_html(station, horizon))
     trend, reading = st.columns([1.6, 1], gap="medium")
     with trend, st.container(key="card-station-trend"):
         kind = st.radio(
