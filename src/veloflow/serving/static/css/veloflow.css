@@ -909,6 +909,7 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
      iOS does not zoom in on focus. */
   [class*="st-key-toolbar"] { gap: var(--vf-space-3) !important; }
   [class*="st-key-toolbar"] > [data-testid="stElementContainer"],
+  [class*="st-key-card-"] > [data-testid="stElementContainer"]:has([data-testid="stRadio"]),
   .st-key-toolbar-go [data-testid="stElementContainer"]:has([data-testid="stSelectbox"]) {
     width: 100% !important; max-width: none; flex: 1 1 100%; }
   [data-testid="stMain"] [data-testid="stRadio"]:not(.st-key-vf-header *),

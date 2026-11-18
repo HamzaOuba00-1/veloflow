@@ -118,16 +118,17 @@ def test_map_page_opens_on_the_central_station(page: AppTest) -> None:
     assert "Châtelet" in html
 
 
-def test_the_map_card_has_its_own_horizon_15_min_first(page: AppTest) -> None:
+def test_the_station_card_sets_the_horizon_of_the_whole_map_page(page: AppTest) -> None:
     nav(page).set_value("Map").run()
-    page.radio(key="map_h").set_value("60").run()  # the map's horizon does not drive the card
 
     card = page.radio(key="map_card_h")
-    assert card.value == "15"
+    assert card.value == "15"  # 15 min first
     assert card.options == ["In 15 min", "In 30 min", "In 60 min"]
-    card.set_value("30").run()
+    assert "Average chance of a bike in 15 min" in html_of(page)
+    card.set_value("60").run()
     assert not page.exception
-    assert page.session_state["map_card_h"] == "30"
+    assert "Average chance of a bike in 60 min" in html_of(page)
+    assert "Next 15 / 30 / 60 min" not in html_of(page)  # the card shows one horizon
 
 
 def test_the_url_opens_a_page_and_a_station(

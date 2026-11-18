@@ -572,9 +572,11 @@ def _map(
     )
     with st.container(horizontal=True, key="toolbar-map"):
         need = NEEDS[st.radio("Looking for", list(NEEDS), horizontal=True, key="map_need")]
-        horizon = st.radio(
-            "In", steps, horizontal=True, key="map_h", format_func=lambda h: f"{h} min"
-        )
+    # One horizon for the whole page, chosen in the station card (15 min first):
+    # it colours the map and fills the card. Read here, drawn further down.
+    horizon = state.get("map_card_h", steps[0])
+    if horizon not in steps:
+        horizon = steps[0]
     thing = "bike" if need == "bike" else "dock"
     chances = [chance(s, need, horizon) for s in stations if horizon in s["forecasts"]]
     average = sum(chances) / len(chances) if chances else 0.0
@@ -620,24 +622,17 @@ def _map(
                 st.rerun()
     with right, st.container(key="card-map-station"):
         if selected is not None:
-            st.html(
-                station_head_html(selected)
-                + '<div class="vf-subtitle"><small>tap a station on the map</small></div>'
-            )
-            # The card has its own horizon, 15 min first, like the Station page:
-            # the map's "In" choice colours the map, this one details one station.
-            card_h = st.radio(
+            # The hint shares the district's line: the card stays shorter than the
+            # map, so both end on the same line (cards stretch to their row).
+            st.html(station_head_html(selected, " · tap another station on the map"))
+            st.radio(
                 "Forecast",
-                horizons([selected]),
+                steps,
                 horizontal=True,
                 key="map_card_h",
                 format_func=lambda h: f"In {h} min",
             )
-            st.html(
-                count_cards_html(selected, card_h)
-                + risk_cards_html(selected, card_h)
-                + horizon_table_html(selected)
-            )
+            st.html(count_cards_html(selected, horizon) + risk_cards_html(selected, horizon))
             st.button(
                 "Open station page", width="stretch", on_click=go("Station"), key="open-station"
             )
