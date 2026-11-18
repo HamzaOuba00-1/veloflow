@@ -61,11 +61,17 @@ def test_pictures_are_optional(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     assert theme.image_url("landing-cta") is None  # not added yet: the page draws a fallback
     (images / "landing-cta.jpg").write_bytes(b"\xff\xd8")
-    assert theme.image_url("landing-cta") == "app/static/images/landing-cta.jpg"
+    assert str(theme.image_url("landing-cta")).startswith("app/static/images/landing-cta.jpg?v=")
     (images / "landing-cta.webp").write_bytes(b"RIFF")
-    assert theme.image_url("landing-cta") == "app/static/images/landing-cta.webp"  # WebP wins
+    webp = theme.image_url("landing-cta")
+    assert str(webp).startswith("app/static/images/landing-cta.webp?v=")  # WebP wins
+    (images / "landing-cta.webp").write_bytes(b"RIFF2")
+    assert theme.image_url("landing-cta") != webp  # new picture, new URL: no stale cache
 
 
 def test_bundled_logo_and_favicon() -> None:
-    assert theme.image_url("logo") == "app/static/images/logo.png"  # the PNG wins over the SVG
+    assert str(theme.image_url("logo")).startswith("app/static/images/logo.png?v=")
+    sheet = theme.style_sheet()
+    assert 'url("app/static/images/logo.png?v=' in sheet  # the tile of the header
+    assert 'url("app/static/fonts/InterVariable-latin.woff2?v=' in sheet
     assert (theme.STATIC / "images" / "favicon.png").is_file()

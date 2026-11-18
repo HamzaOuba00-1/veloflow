@@ -12,6 +12,8 @@ text-secondary 6.5 / 6.3 · text-tertiary 5.1 / 4.9 · success 5.3 / 5.1 ·
 warning 5.6 / 5.4 · error 5.1 / 4.9 · e-bike 5.8 / 5.6 · docks 5.2 / 5.0.
 """
 
+import hashlib
+import re
 from functools import lru_cache
 from importlib.resources import files
 
@@ -140,12 +142,27 @@ def style_sheet() -> str:
     read once per server.
     """
     sheet = (STATIC / "css" / "veloflow.css").read_text(encoding="utf-8")
+    # Files named in the sheet get their version too (logo tile, font).
+    sheet = re.sub(
+        rf'url\("{STATIC_URL}/([^"?]+)"\)',
+        lambda m: f'url("{static_url(*m.group(1).split("/"))}")',
+        sheet,
+    )
     return f"<style>{custom_properties()}\n{sheet}</style>"
 
 
 def static_url(*parts: str) -> str:
-    """URL of a file under ``static/`` (relative: works behind any base path)."""
-    return "/".join((STATIC_URL, *parts))
+    """URL of a file under ``static/`` (relative: works behind any base path).
+
+    An existing file gets ``?v=`` and the start of its content hash: a new
+    logo or photo has a new URL, so no browser keeps showing the old one from
+    its cache.
+    """
+    url = "/".join((STATIC_URL, *parts))
+    path = STATIC.joinpath(*parts)
+    if path.is_file():
+        url += f"?v={hashlib.sha256(path.read_bytes()).hexdigest()[:10]}"
+    return url
 
 
 def image_url(stem: str) -> str | None:
