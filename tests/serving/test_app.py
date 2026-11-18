@@ -131,6 +131,16 @@ def test_the_station_card_sets_the_horizon_of_the_whole_map_page(page: AppTest) 
     assert "Next 15 / 30 / 60 min" not in html_of(page)  # the card shows one horizon
 
 
+def test_go_now_shows_one_horizon_set_by_the_walking_time(page: AppTest) -> None:
+    nav(page).set_value("Go now").run()
+    page.radio(key="walk").set_value(15).run()
+
+    assert not page.exception
+    html = html_of(page)
+    assert "chance of a bike in 15 min" in html
+    assert "Next 15 / 30 / 60 min" not in html
+
+
 def test_the_url_opens_a_page_and_a_station(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

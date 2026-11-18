@@ -717,7 +717,7 @@ def _go_now(
                 + f'<div class="vf-demo-chance"><b>{percent(chance(station, need, go_h))}</b>'
                 f"<span>chance of a {thing} in {go_h} min</span></div>"
                 + now_compact_html(station)
-                + horizon_table_html(station)
+                # One horizon, set by the walking time: no 15 / 30 / 60 table here.
                 + risk_cards_html(station, go_h)
             )
             st.link_button(

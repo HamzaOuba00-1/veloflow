@@ -23,10 +23,10 @@ from veloflow.serving.ui import (
     chance,
     colour,
     hex_colour,
-    horizon_table_html,
     horizons,
     icon,
     network_trend,
+    now_compact_html,
     percent,
     risk_cards_html,
     series,
@@ -229,7 +229,7 @@ def demo_card_html(station: dict[str, Any], horizon: str) -> str:
         f"{station_head_html(station)}"
         f'<div class="vf-demo-chance"><b>{percent(chance(station, "bike", horizon))}</b>'
         f"<span>chance of a bike in {horizon} min</span></div>"
-        f"{horizon_table_html(station)}{risk_cards_html(station, horizon)}"
+        f"{now_compact_html(station)}{risk_cards_html(station, horizon)}"  # one horizon
     )
 
 
