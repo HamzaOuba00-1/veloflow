@@ -5,7 +5,7 @@
 #
 # Build and deploy: infra/gcp/deploy_cloud_run.ps1 (Cloud Build, no local Docker).
 
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 # libgomp1: OpenMP runtime that LightGBM's compiled library loads (the job
 # trains with it; the slim image does not have it, as the VM did not).
