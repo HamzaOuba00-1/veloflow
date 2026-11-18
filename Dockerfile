@@ -1,10 +1,17 @@
-# One image for the two Cloud Run services: the API (default command) and the
-# web app (command `veloflow-app`). Both only read the forecast document from
-# its public URL: no model, no data and no credentials in the image.
+# One image for the two Cloud Run services and the weekly training job: the
+# API (default command), the web app (command `veloflow-app`) and the job
+# (command `veloflow-retrain`, infra/gcp/create_training.ps1). No model, no
+# data and no credentials in the image.
 #
 # Build and deploy: infra/gcp/deploy_cloud_run.ps1 (Cloud Build, no local Docker).
 
 FROM python:3.12-slim-bookworm
+
+# libgomp1: OpenMP runtime that LightGBM's compiled library loads (the job
+# trains with it; the slim image does not have it, as the VM did not).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # uv, pinned to the same version as the laptop, the VM and CI.
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
@@ -25,7 +32,7 @@ RUN uv sync --frozen --no-default-groups --group app --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-default-groups --group app
 
-# Unprivileged user: the services write nothing.
+# Unprivileged user: the services write nothing; the job writes to /tmp only.
 RUN useradd --system --no-create-home veloflow
 USER veloflow
 

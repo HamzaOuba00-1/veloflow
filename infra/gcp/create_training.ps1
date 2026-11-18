@@ -86,8 +86,8 @@ foreach ($account in @(
     $sa = gcloud iam service-accounts list --project=$Project --filter="email=$($account.Email)" --format="value(email)"
     if ($sa) { Write-Host "Service account $($account.Email) already exists."; continue }
     Step "create service account $($account.Email)" {
-        Invoke-Gcloud iam service-accounts create $account.Name --project=$Project `
-            --display-name=$account.Title
+        Invoke-Gcloud iam service-accounts create $($account.Name) --project=$Project `
+            --display-name="$($account.Title)"
     }
 }
 $grants = @(
@@ -99,7 +99,7 @@ $grants = @(
 foreach ($grant in $grants) {
     Step "$($grant.Member) gets $($grant.Role) on gs://$($grant.Bucket)" {
         Invoke-Gcloud storage buckets add-iam-policy-binding "gs://$($grant.Bucket)" `
-            --member="serviceAccount:$($grant.Member)" --role=$grant.Role --quiet | Out-Null
+            --member="serviceAccount:$($grant.Member)" --role=$($grant.Role) --quiet | Out-Null
     }
 }
 
@@ -122,7 +122,7 @@ Step "$Scheduler may start $Job (and nothing else)" {
 # 4. The schedule.
 $uri = "https://run.googleapis.com/v2/projects/$Project/locations/$Region/jobs/${Job}:run"
 $scheduled = gcloud scheduler jobs list --project=$Project --location=$Region `
-    --filter="name~$Job-weekly" --format="value(name)"
+    --filter="name~$Job-weekly" --format="value(name)" --quiet
 if ($scheduled) {
     Write-Host "Schedule $Job-weekly already exists."
 } else {
@@ -134,14 +134,21 @@ if ($scheduled) {
 }
 
 # 5. The model copied by hand becomes the first champion.
-$pointer = gcloud storage ls "gs://$ModelsBucket/champion.json" 2>$null
-if ($pointer) {
+# Listed, not read: gcloud reports a missing object on stderr, which Windows
+# PowerShell 5.1 turns into an error. Listing an existing bucket never fails.
+$registry = gcloud storage buckets list --project=$Project --filter="name=$ModelsBucket" `
+    --format="value(name)"
+$pointer = if ($registry) { @(gcloud storage ls "gs://$ModelsBucket/") -match 'champion\.json$' }
+if (-not $registry) {
+    Write-Host "No bucket gs://$ModelsBucket yet (dry run): the champion is registered on the real run."
+} elseif ($pointer) {
     Write-Host "The registry already has a champion."
 } elseif (-not (Test-Path $LocalModel)) {
-    Write-Host "No $LocalModel: the first run of the job will face persistence."
+    Write-Host "No ${LocalModel}: the first run of the job will face persistence."
 } else {
     $card = Get-Content ($LocalModel -replace '\.pkl$', '.json') -Raw | ConvertFrom-Json
-    $version = ([datetime]$card.trained_at).ToString("yyyyMMdd'T'HHmmss'Z'")
+    # The card time is UTC ("+00:00"): keep it so, as the job names its versions.
+    $version = ([datetimeoffset]$card.trained_at).UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'")
     Step "register $LocalModel as version $version, in service" {
         Invoke-Gcloud storage cp $LocalModel ($LocalModel -replace '\.pkl$', '.json') `
             "gs://$ModelsBucket/versions/$version/"

@@ -60,6 +60,11 @@ jobs:
       - name: Build the image
         run: docker build -t veloflow .
 
+      - name: The training job can load its libraries
+        # LightGBM loads libgomp at import: a missing system library fails here,
+        # not on Monday in the scheduled job.
+        run: docker run --rm veloflow python -c "import lightgbm, sklearn, veloflow.models.retrain"
+
       - name: Start the API and the app
         run: |
           docker run -d --name api -p 8080:8080 veloflow
