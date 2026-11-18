@@ -262,9 +262,11 @@ product pages, with violet as its one accent.
 
 Pictures live in `serving/static/images/` and are served by Streamlit's
 static file serving (`app/static/...`, turned on by `veloflow-app`), not
-inlined in every rerun. The logo (a white P drawn as a bike, with three
-speed lines in the app's violet) sits on a dark aubergine tile (`#2B2640`) in
-the header and the footer; the favicon is the same tile. Two photos are optional: `landing-ride` (story section) and
+inlined in every rerun. The logo (a P drawn as a bike in the app's ink,
+with three speed lines in its violet) sits on a light violet tile in the
+header and the footer; the favicon is the same tile. Pictures and the font
+are served with `?v=` and a hash of their content: a new file has a new URL,
+never hidden by a browser cache. Two photos are optional: `landing-ride` (story section) and
 `landing-cta` (closing call to action); without them the page draws its own
 panels (`theme.image_url` returns `None`). The story's figures (stations with
 a bike now, average chance at the longest horizon) are always the live ones,

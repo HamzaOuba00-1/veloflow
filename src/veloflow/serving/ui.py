@@ -319,7 +319,11 @@ def live_status_html(document: dict[str, Any], status: str, age_s: float = 0.0) 
 def brand_html(href: str | None = None) -> str:
     """Logo tile and name; a link to ``href`` when given (the footer)."""
     logo = theme.image_url("logo")
-    mark = f'<img src="{logo}" alt="" width="24" height="20">' if logo else icon("bike", 20, "#fff")
+    mark = (
+        f'<img src="{logo}" alt="" width="24" height="20">'
+        if logo
+        else icon("bike", 20, theme.SECONDARY)
+    )
     inner = f'<span class="vf-brand-mark">{mark}</span><span class="vf-brand-name">VéloFlow</span>'
     if href:
         return f'<a class="vf-brand" href="{href}" aria-label="VéloFlow home">{inner}</a>'

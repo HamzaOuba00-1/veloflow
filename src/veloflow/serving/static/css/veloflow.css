@@ -108,9 +108,9 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 }
 .stApp .st-key-brand button::before {
   content: ""; width: 34px; height: 34px; border-radius: 10px; flex: none;
-  /* Dark tile: the white frame and the violet speed lines of the logo both show. */
-  background: var(--vf-color-secondary) url("app/static/images/logo.png") center / 24px auto no-repeat;
-  box-shadow: 0 4px 12px rgba(43, 38, 64, .24);
+  /* Light violet tile: the ink P and the violet speed lines of the logo both show. */
+  background: var(--vf-color-primary-light) url("app/static/images/logo.png") center / 24px auto no-repeat;
+  border: 1px solid var(--vf-color-primary-soft); box-sizing: border-box;
   transition: transform var(--vf-fast) var(--vf-ease);
 }
 .stApp .st-key-brand button:hover::before { transform: scale(1.05); }
@@ -121,8 +121,8 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 .vf-brand { display: inline-flex; align-items: center; gap: var(--vf-space-3);
   color: var(--vf-color-text); text-decoration: none; }
 .vf-brand-mark { width: 34px; height: 34px; border-radius: 10px; flex: none;
-  display: grid; place-items: center; background: var(--vf-color-secondary);
-  box-shadow: 0 4px 12px rgba(43, 38, 64, .24); }
+  display: grid; place-items: center; background: var(--vf-color-primary-light);
+  border: 1px solid var(--vf-color-primary-soft); box-sizing: border-box; }
 .vf-brand-mark img { width: 24px; height: auto; display: block; }
 .vf-brand-name { font-size: 1.0625rem; font-weight: 650; letter-spacing: -.015em; }
 
