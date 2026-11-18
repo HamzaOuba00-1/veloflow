@@ -288,3 +288,38 @@ def test_a_monitoring_failure_does_not_stop_the_forecasts(
 
     assert main(["--data-dir", str(served), "--model", model, "--out", str(out)], now=NOW) == 0
     assert "status" not in json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_training_summary_keeps_the_last_decisions_newest_first() -> None:
+    from veloflow.serving.live import training_summary
+
+    history = [
+        {
+            "version": f"v{k}",
+            "at": "x",
+            "decision": "rejected",
+            "against": "champion",
+            "holdout": ["d"] * 7,
+            "scores": {
+                "challenger": {"mae": 1.0, "brier": 0.1},
+                "champion": {"mae": 0.9, "brier": 0.1},
+            },
+        }
+        for k in range(8)
+    ]
+    summary = training_summary({"current": "v0", "previous": None, "history": history})
+    assert [r["version"] for r in summary["runs"]] == ["v7", "v6", "v5", "v4", "v3"]
+    assert summary["runs"][0]["mae"] == [1.0, 0.9]
+    assert summary["runs"][0]["holdout_days"] == 7
+
+
+def test_an_unreachable_registry_keeps_the_local_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from veloflow.serving import live as module
+
+    def broken(*args: object) -> None:
+        raise OSError("no network")
+
+    monkeypatch.setattr(module, "sync_champion", broken)
+    assert module.champion_from("gs://models", tmp_path) is None

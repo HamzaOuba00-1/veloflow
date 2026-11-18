@@ -1,12 +1,18 @@
 """Rolling-origin backtest, one Paris day at a time.
 
 For each test day ``D``, the forecaster learns from the data fetched before
-``D`` (midnight, Paris time), then forecasts every example whose origin falls
-in ``D``. The training window grows day after day; examples are built one test
-day at a time so that memory does not grow with the history.
+``D`` (midnight, Paris time), at most ``TRAIN_DAYS`` days of it, then forecasts
+every example whose origin falls in ``D``.
 
-The quality masks (rules R4a and R4b) are computed once on all the data. They
-only decide which rows are trusted, and never feed a value to a forecaster.
+The data is read a window at a time (``SilverSource``): one test day and its
+training window are in memory, never the whole history, so a run over six
+weeks needs no more memory than over two. ``FrameSource`` serves rows already
+in memory (tests, small runs) the same way.
+
+The quality masks (rules R4a and R4b) are computed once on all the data, one
+day at a time with a margin (``quality_masks``), and give the same masks as a
+computation on everything at once. They only decide which rows are trusted,
+and never feed a value to a forecaster.
 
 A forecaster must not read the future. ``check_no_lookahead`` makes it
 predict twice, once with the whole test day and once with history and
@@ -16,12 +22,14 @@ change.
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
 import polars as pl
 
-from veloflow.datasets import resample_status
+from veloflow.datasets import load_station_status, resample_status, silver_days
 from veloflow.evaluation.examples import EXCLUSION_REASONS, HORIZONS_MIN, build_examples
 from veloflow.models.base import (
     INPUT_COLUMNS,
@@ -41,6 +49,21 @@ GRID_TOLERANCE = timedelta(minutes=5)
 # holds a version (rule R6 reports the gaps in detail).
 MIN_DAY_COVERAGE = 0.9
 COVERAGE_SLOT = timedelta(minutes=5)
+# Days of history a forecaster learns from at each test day: bounds memory and
+# time as the history grows (a profile needs a few weeks, not every day).
+TRAIN_DAYS = 28
+# Rules R4a and R4b computed day by day see this much data before and after
+# the day, so that their result equals a computation on everything at once
+# (R4b needs 12 daytime hours of a run; two days hold at least 30).
+MASK_BEFORE = timedelta(days=2)
+MASK_AFTER = timedelta(hours=2)
+DAY = timedelta(days=1)
+PERIOD_SCHEMA: dict[str, pl.DataType] = {
+    "station_id": pl.Int64(),
+    "frozen_from": pl.Datetime("us", "UTC"),
+    "frozen_until": pl.Datetime("us", "UTC"),
+    "daytime_hours": pl.Float64(),
+}
 
 
 class InvalidPredictionError(ValueError):
@@ -69,6 +92,142 @@ class BacktestResult:
     model: str
     frame: pl.DataFrame
     folds: list[FoldSummary]
+
+
+class StatusSource(Protocol):
+    """Cleaned ``station_status`` rows, read one window at a time."""
+
+    def days(self) -> list[date]:
+        """UTC days that hold data, in order."""
+        ...
+
+    def load(self, start: datetime, end: datetime) -> pl.DataFrame:
+        """Rows fetched in ``[start, end)``."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class FrameSource:
+    """Rows already in memory (rows from ``datasets.load_station_status``)."""
+
+    frame: pl.DataFrame
+
+    def days(self) -> list[date]:
+        """UTC days of the rows."""
+        if self.frame.height == 0:
+            return []
+        dates = self.frame.select(pl.col("fetched_at").dt.date().unique().sort())
+        return list(dates.to_series())
+
+    def load(self, start: datetime, end: datetime) -> pl.DataFrame:
+        """Rows fetched in ``[start, end)``."""
+        return self.frame.filter(pl.col("fetched_at").is_between(start, end, closed="left"))
+
+
+@dataclass(frozen=True, slots=True)
+class SilverSource:
+    """Silver ``station_status`` of ``data_dir``, from ``first`` to ``last`` (UTC days).
+
+    Each window is read with the day before it, so that rule R1 compares its
+    first versions with the previous ones, as on a single read.
+    """
+
+    data_dir: Path
+    first: date | None = None
+    last: date | None = None
+
+    def days(self) -> list[date]:
+        """Silver days within ``[first, last]``."""
+        return [
+            day
+            for day in silver_days(self.data_dir)
+            if (self.first is None or day >= self.first) and (self.last is None or day <= self.last)
+        ]
+
+    def load(self, start: datetime, end: datetime) -> pl.DataFrame:
+        """Rows fetched in ``[start, end)``, within ``[first, last]``."""
+        low = (start - DAY).date()
+        high = (end - timedelta(microseconds=1)).date()
+        if self.first is not None:
+            low = max(low, self.first)
+        if self.last is not None:
+            high = min(high, self.last)
+        frame = load_station_status(self.data_dir, low, high).frame
+        return frame.filter(pl.col("fetched_at").is_between(start, end, closed="left"))
+
+
+@dataclass(frozen=True, slots=True)
+class QualityMasks:
+    """Rules R4a and R4b over every day of a source, and the fetch times."""
+
+    frozen_slots: pl.DataFrame
+    frozen_stations: pl.DataFrame
+    fetch_times: pl.DataFrame
+
+
+def _merge_periods(periods: pl.DataFrame) -> pl.DataFrame:
+    """Join the day pieces of a period back together (a piece ends where the next starts)."""
+    if periods.height == 0:
+        return periods
+    return (
+        periods.sort("station_id", "frozen_from")
+        .with_columns(
+            piece=(pl.col("frozen_from") != pl.col("frozen_until").shift(1).over("station_id"))
+            .fill_null(value=True)
+            .cum_sum()
+            .over("station_id")
+        )
+        .group_by("station_id", "piece", maintain_order=True)
+        .agg(
+            pl.col("frozen_from").min(),
+            pl.col("frozen_until").max(),
+            # Longest piece seen: a window shows at most a few days of a run.
+            pl.col("daytime_hours").max(),
+        )
+        .drop("piece")
+    )
+
+
+def quality_masks(source: StatusSource) -> QualityMasks:
+    """Rules R4a and R4b over every day of ``source``, one day in memory at a time.
+
+    Each UTC day is computed with ``MASK_BEFORE`` and ``MASK_AFTER`` of data
+    around it, then cut to the day: the counts of changes per version (R4a)
+    and the suspected frozen periods (R4b) equal those of one computation on
+    everything.
+    """
+    counts, periods, times = [], [], []
+    for day in source.days():
+        start = datetime.combine(day, time(), tzinfo=UTC)
+        end = start + DAY
+        frame = source.load(start - MASK_BEFORE, end + MASK_AFTER)
+        in_day = pl.col("fetched_at").is_between(start, end, closed="left")
+        counts.append(change_counts(frame).filter(in_day))
+        times.append(frame.filter(in_day).select(pl.col("fetched_at").unique()))
+        periods.append(
+            suspected_frozen_stations(frame)
+            .with_columns(
+                frozen_from=pl.max_horizontal("frozen_from", pl.lit(start)),
+                frozen_until=pl.min_horizontal("frozen_until", pl.lit(end)),
+            )
+            .filter(pl.col("frozen_from") < pl.col("frozen_until"))
+        )
+    count_frame = (
+        pl.concat(counts)
+        if counts
+        else pl.DataFrame(schema={"fetched_at": pl.Datetime("us", "UTC"), "changed": pl.Int64})
+    )
+    return QualityMasks(
+        frozen_slots=frozen_feed_slots(count_frame),
+        frozen_stations=(
+            _merge_periods(pl.concat(periods)) if periods else pl.DataFrame(schema=PERIOD_SCHEMA)
+        ),
+        fetch_times=(
+            pl.concat(times)
+            if times
+            else pl.DataFrame(schema={"fetched_at": pl.Datetime("us", "UTC")})
+        ),
+    )
 
 
 def day_bounds(day: date) -> tuple[datetime, datetime]:
@@ -170,34 +329,49 @@ def check_no_lookahead(
 
 def run_backtest(
     model: Forecaster,
-    status: pl.DataFrame,
+    status: pl.DataFrame | StatusSource,
     *,
     days: list[date] | None = None,
     horizons: tuple[int, ...] = HORIZONS_MIN,
     lookahead_check: bool = True,
+    train_days: int | None = TRAIN_DAYS,
+    masks: QualityMasks | None = None,
 ) -> BacktestResult:
     """Evaluate ``model`` on every test day of ``status``.
 
     Args:
         model: the forecaster to evaluate.
-        status: rows from ``datasets.load_station_status``.
-        days: test days (Paris); by default ``evaluation_days(status)``.
+        status: rows from ``datasets.load_station_status``, or a source that
+            reads them a window at a time (``SilverSource``).
+        days: test days (Paris); by default ``evaluation_days`` of the data.
         horizons: forecast horizons in minutes.
         lookahead_check: run ``check_no_lookahead`` on the first test day,
             cut at noon.
+        train_days: days of history before each test day the model learns
+            from; ``None`` for all of it.
+        masks: ``quality_masks(source)``, to share it between models.
 
     Returns:
         Kept examples of every test day with targets, ``suspected_frozen``,
         ``day`` and predictions; one summary per test day.
     """
-    frozen_slots = frozen_feed_slots(change_counts(status))
-    frozen_stations = suspected_frozen_stations(status)
-    selected = evaluation_days(status) if days is None else days
+    source = FrameSource(status) if isinstance(status, pl.DataFrame) else status
+    masks = quality_masks(source) if masks is None else masks
+    frozen_slots, frozen_stations = masks.frozen_slots, masks.frozen_stations
+    selected = evaluation_days(masks.fetch_times) if days is None else days
     max_horizon = timedelta(minutes=max(horizons))
+    lookback = DAY * train_days if train_days is not None else None
+    all_days = source.days()
+    data_start = (
+        datetime.combine(all_days[0], time(), tzinfo=UTC) if all_days else datetime.now(UTC)
+    )
     scored: list[pl.DataFrame] = []
     folds: list[FoldSummary] = []
     for index, day in enumerate(selected):
         start, end = day_bounds(day)
+        # One read per test day: the training window, the day and its last targets.
+        first = start - lookback if lookback is not None else data_start
+        status = source.load(first, end + max_horizon + GRID_TOLERANCE)
         history = status.filter(pl.col("fetched_at") < start)
         model.fit(TrainingData(history, frozen_slots, frozen_stations, start))
 

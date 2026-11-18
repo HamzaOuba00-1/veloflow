@@ -1,0 +1,30 @@
+# Dependabot opens a pull request when a dependency has a new version or a
+# security fix. Each one runs the CI and the audit before anything is merged;
+# nothing is merged automatically.
+version: 2
+updates:
+  - package-ecosystem: uv # pyproject.toml and uv.lock
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch releases together, so one pull request a week at most.
+      python-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions # the actions pinned by SHA in .github/workflows
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker # the base image of the Dockerfile
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

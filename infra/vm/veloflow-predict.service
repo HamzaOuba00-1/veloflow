@@ -3,8 +3,9 @@ Description=VeloFlow: forecast every station now, then publish the document to C
 Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/deployment.md
 Wants=network-online.target
 After=network-online.target
-# The model is trained on the laptop and copied here by hand: until then the
-# job is skipped, not failed.
+# The model comes from the registry (VELOFLOW_MODELS_URL, downloaded when the
+# champion changes) or was copied here by hand: until one exists the job is
+# skipped, not failed.
 ConditionPathExists=/var/lib/veloflow/models/lightgbm.pkl
 
 [Service]

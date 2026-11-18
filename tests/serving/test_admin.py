@@ -58,3 +58,31 @@ def test_events_and_models(status_block: Block) -> None:
     assert "11 Nov 2026 23:46" in models
     assert "05 Nov 2026 00:00" in models
     assert "1,234,567" in models
+
+
+def test_training_runs_table() -> None:
+    from veloflow.serving.admin import training_html
+
+    assert training_html({}) == ""
+    block = {
+        "training": {
+            "current": "20261123T031500Z",
+            "previous": None,
+            "runs": [
+                {
+                    "version": "20261123T031500Z",
+                    "at": "2026-11-23T03:15:00+00:00",
+                    "decision": "promoted",
+                    "against": "champion",
+                    "holdout_days": 7,
+                    "mae": [0.812, 0.843],
+                    "brier": [0.0311, 0.0324],
+                }
+            ],
+        }
+    }
+    html = training_html(block)
+    assert "in service: 20261123T031500Z" in html
+    assert "promoted" in html
+    assert "0.812 / 0.843" in html
+    assert "0.0311 / 0.0324" in html

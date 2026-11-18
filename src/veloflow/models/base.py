@@ -5,8 +5,9 @@ cutoff) and predicts a batch of examples stripped of their targets. For each
 example it returns the three counts and the probabilities of the two events.
 """
 
+import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 
 import polars as pl
@@ -77,6 +78,39 @@ class TrainingData:
         return examples.filter(
             ~pl.col("suspected_frozen") & (pl.col("target_at") < self.cutoff)
         ).drop("suspected_frozen")
+
+    def sampled_examples(
+        self, max_rows: int, *, seed: int = 0, horizons: tuple[int, ...] = HORIZONS_MIN
+    ) -> pl.DataFrame:
+        """At most about ``max_rows`` training examples per horizon, built one day at a time.
+
+        Every day of the history gets the same share of the budget, so the
+        examples of one day are built, sampled and released before the next:
+        memory follows the budget, not the length of the history. A history
+        that fits the budget gives the same examples as ``examples``.
+        """
+        grid = resample_status(self.history.filter(pl.col("fetched_at") < self.cutoff))
+        if grid.height == 0:
+            return self.examples(horizons)
+        days = grid.select(pl.col("time").dt.truncate("1d").unique().sort()).to_series().to_list()
+        share = math.ceil(max_rows / len(days))
+        reach = timedelta(minutes=max(horizons))
+        parts = []
+        for index, day in enumerate(days):
+            end = day + timedelta(days=1)
+            built = build_examples(
+                grid.filter(pl.col("time").is_between(day, end + reach, closed="left")),
+                horizons=horizons,
+                frozen_slots=self.frozen_slots,
+                frozen_stations=self.frozen_stations,
+                origin_range=(day, end),
+            ).frame.filter(~pl.col("suspected_frozen") & (pl.col("target_at") < self.cutoff))
+            for horizon in horizons:
+                subset = built.filter(pl.col("horizon_min") == horizon)
+                if subset.height > share:
+                    subset = subset.sample(share, seed=seed + index)
+                parts.append(subset.drop("suspected_frozen"))
+        return pl.concat(parts).sort("horizon_min", "station_id", "origin")
 
 
 class Forecaster(Protocol):

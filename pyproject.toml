@@ -35,6 +35,8 @@ veloflow-backtest = "veloflow.evaluation.report:main"
 veloflow-train = "veloflow.models.train:main"
 veloflow-predict = "veloflow.serving.live:main"
 veloflow-api = "veloflow.serving.api:main"
+veloflow-share-data = "veloflow.storage.share:main"
+veloflow-retrain = "veloflow.models.retrain:main"
 veloflow-app = "veloflow.serving.app:main"
 
 [build-system]

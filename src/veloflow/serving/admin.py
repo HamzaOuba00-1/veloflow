@@ -173,6 +173,43 @@ def events_html(status: dict[str, Any]) -> str:
     )
 
 
+def training_html(status: dict[str, Any]) -> str:
+    """Decisions of the weekly training job: challenger against champion."""
+    training = status.get("training")
+    if not training or not training.get("runs"):
+        return ""
+
+    def pair(values: list[float | None], digits: int) -> str:
+        challenger, reference = values
+        return f"{_num(challenger, digits)} / {_num(reference, digits)}"
+
+    rows = "".join(
+        f"<tr><td><code>{escape(str(r['version']))}</code></td><td>{_day(r['at'])}</td>"
+        f"<td>{escape(str(r['decision']))}</td><td>{escape(str(r.get('against') or DASH))}</td>"
+        f'<td class="r vf-fig">{r["holdout_days"]}</td>'
+        f'<td class="r vf-fig">{pair(r["mae"], 3)}</td>'
+        f'<td class="r vf-fig">{pair(r["brier"], 4)}</td></tr>'
+        for r in training["runs"]
+    )
+    current = training.get("current") or "the model copied by hand"
+    return _table_card(
+        "Training runs",
+        f"in service: {current}",
+        [
+            "Version",
+            "Run",
+            "Decision",
+            "Against",
+            "#Holdout days",
+            "#MAE new / old",
+            "#Brier new / old",
+        ],
+        rows,
+        "Every Monday a challenger learns from the last four weeks and is scored on the days "
+        "the champion never saw; it goes into service only if no worse on both scores.",
+    )
+
+
 def models_html(status: dict[str, Any]) -> str:
     """Models put in service on the VM, newest first."""
     rows = "".join(

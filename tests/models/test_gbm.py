@@ -209,3 +209,66 @@ def test_conformal_half_width_is_finite_sample_corrected() -> None:
     assert conformal_half_width(errors[:9], level=0.7) == 1.0
     # Too few examples for the level: no finite guarantee.
     assert conformal_half_width(np.array([1.0, 2.0])) == float("inf")
+
+
+def test_conformal_bounds_pick_the_narrowest_interval_apart() -> None:
+    from veloflow.models.gbm import conformal_bounds
+
+    # 60 % exact, 25 % one above, 15 % one below: n = 100, the rank is 81.
+    errors = np.array([0.0] * 60 + [1.0] * 25 + [-1.0] * 15)
+    assert conformal_bounds(errors) == (0.0, 1.0)  # holds 85, where ± 1 holds 100
+    assert conformal_half_width(errors) == 1.0
+    assert conformal_bounds(-errors) == (1.0, 0.0)
+    assert conformal_bounds(np.array([0.0, 1.0])) == (float("inf"), float("inf"))
+    # Every error above: the interval still holds the forecast (rank 9 of 10).
+    assert conformal_bounds(np.array([2.0] * 9 + [3.0])) == (0.0, 2.0)
+
+
+def test_mondrian_bounds_per_activity_group() -> None:
+    from veloflow.models.gbm import MIN_GROUP_EXAMPLES, POOLED, activity_group, interval_bounds
+
+    changes = pl.DataFrame({"d": [-4, -2, 0, None, 1, 3]}, schema={"d": pl.Int16})
+    assert changes.select(activity_group(pl.col("d"))).to_series().to_list() == [2, 1, 0, 0, 1, 2]
+
+    quiet = np.zeros(MIN_GROUP_EXAMPLES)
+    # 10 % one below, 40 % exact, 30 % one above, 20 % two above (rank 401 of 500).
+    busy = np.array([-1.0] * 50 + [0.0] * 200 + [1.0] * 150 + [2.0] * 100)
+    errors = np.concatenate([quiet, busy, [5.0] * 10])
+    groups = np.concatenate([np.zeros(len(quiet)), np.full(len(busy), 2), np.ones(10)])
+    bounds = interval_bounds(errors, groups.astype(np.int8), "mondrian")
+    assert bounds[0] == (0.0, 0.0)  # a quiet station keeps its count
+    assert bounds[2] == (0.0, 2.0)  # 90 %; ± 1 holds 80 %, one error short of the rank
+    assert 1 not in bounds  # too few errors: the pooled bounds serve it
+    assert POOLED in bounds
+    assert interval_bounds(errors, groups, "symmetric") == {POOLED: (1.0, 1.0)}
+
+
+def test_a_model_saved_before_mondrian_intervals_still_forecasts(
+    synthetic_status: pl.DataFrame,
+) -> None:
+    gbm = model()
+    cutoff = day_bounds(date(2026, 11, 10))[0]
+    gbm.fit(no_masks(synthetic_status, cutoff))
+    examples = examples_of(synthetic_status, cutoff, 30, 40)
+    new = gbm.predict(synthetic_status, examples)
+    for horizon_models in gbm.models.values():
+        del horizon_models.bounds  # as unpickled from an older model
+        horizon_models.half_widths = dict.fromkeys(horizon_models.half_widths, 1.0)
+    old = gbm.predict(synthetic_status, examples)
+    assert new.select(KEYS).equals(old.select(KEYS))
+    assert (old["hi_mechanical"] - old["pred_mechanical"].round() <= 1).all()
+
+
+def test_examples_sampled_day_by_day(synthetic_status: pl.DataFrame) -> None:
+    cutoff = day_bounds(date(2026, 11, 10))[0]
+    data = no_masks(synthetic_status, cutoff)
+    everything = data.examples()
+
+    # A budget the history fits in: the same examples as building them at once.
+    assert data.sampled_examples(10_000_000).equals(everything)
+    # A small budget: each UTC day gets its share, per horizon.
+    sampled = data.sampled_examples(30)
+    per_day = sampled.group_by(pl.col("origin").dt.date(), "horizon_min").len()
+    days = everything["origin"].dt.date().n_unique()
+    assert per_day["len"].max() == -(-30 // days)  # 30 rows shared by the days
+    assert sampled.height < everything.height

@@ -151,3 +151,33 @@ def status_block() -> Callable[..., dict[str, Any]]:
     Keywords replace whole sections (``alerts=[...]``, ``live={...}``).
     """
     return _status_block
+
+
+# --- Cloud Storage, in memory ------------------------------------------------
+
+
+class MemoryStorage:
+    """``veloflow.gcs.Storage`` without the network: objects in a dict."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.writes: list[str] = []
+
+    def read(self, url: str) -> bytes | None:
+        return self.objects.get(url)
+
+    def write(self, url: str, data: bytes, content_type: str = "") -> None:
+        self.objects[url] = data
+        self.writes.append(url)
+
+    def list(self, url: str) -> dict[str, int]:
+        return {k: len(v) for k, v in self.objects.items() if k.startswith(url)}
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def memory_storage() -> MemoryStorage:
+    """An empty in-memory bucket store."""
+    return MemoryStorage()

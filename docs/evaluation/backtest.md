@@ -49,8 +49,8 @@ exploration (docs/data/eda.md) and slightly higher, since the frozen periods,
 where persistence is right for free, are now excluded.
 
 Building the examples of these 58 hours takes 6 seconds and 1.1 GB of
-memory. Six weeks will not fit at once: the bench will build them one test
-day at a time.
+memory. Six weeks would not fit at once: the bench builds them one test day
+at a time and reads the data a window at a time (see below).
 
 ## The bench
 
@@ -74,11 +74,16 @@ examples, null values or probabilities outside [0, 1].
 
 The test days are the complete Paris days with data before them. For each
 test day `D`, the model is fitted on everything fetched before midnight `D`
-(Paris time), then forecasts every example whose origin falls in `D`. The
-training window grows day after day. The examples are built one test day at
-a time, so memory stays flat as the history grows.
+(Paris time), at most the last 28 days of it (`TRAIN_DAYS`, `--train-days`),
+then forecasts every example whose origin falls in `D`. The silver files are
+read a window at a time (`SilverSource`): for each test day, its training
+window, the day and the hour after it; never the whole history. Memory
+depends on the training window, not on the length of the history.
 
-The quality masks are computed once on all the data. This is the one place
+The quality masks are computed once on all the data, one UTC day at a time
+with two days before and two hours after it (`quality_masks`): a test checks
+that the result equals one computation on everything, frozen stations across
+midnight included. This is the one place
 where later data is used: a mask only decides which rows are trusted, it
 never gives a value to a model. Computing them fold by fold would leave the
 9 November incident unmasked in training, since its reference needs other

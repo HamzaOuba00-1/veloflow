@@ -17,32 +17,21 @@ from urllib.parse import quote
 
 import httpx
 
-METADATA_TOKEN_URL = (
-    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
-)
+from veloflow.gcs import METADATA_TOKEN_URL, metadata_token, parse_gs_url
+
 UPLOAD_URL = "https://storage.googleapis.com/upload/storage/v1/b/{bucket}/o"
 # Readers must always get the latest document: a public object is otherwise
 # cached for an hour by Google's edge caches.
 CACHE_CONTROL = "no-cache, max-age=0"
 TIMEOUT_S = 30.0
 
-
-def parse_gs_url(url: str) -> tuple[str, str]:
-    """``("bucket", "path/name.json")`` from ``gs://bucket/path/name.json``."""
-    if not url.startswith("gs://"):
-        raise ValueError(f"not a gs:// URL: {url}")
-    bucket, _, name = url.removeprefix("gs://").partition("/")
-    if not bucket or not name:
-        raise ValueError(f"a gs:// URL needs a bucket and an object name: {url}")
-    return bucket, name
-
-
-def metadata_token(client: httpx.Client) -> str:
-    """An access token of the VM's service account (valid about an hour)."""
-    response = client.get(METADATA_TOKEN_URL, headers={"Metadata-Flavor": "Google"})
-    response.raise_for_status()
-    token: str = response.json()["access_token"]
-    return token
+__all__ = [
+    "METADATA_TOKEN_URL",
+    "metadata_token",
+    "multipart_related",
+    "parse_gs_url",
+    "publish",
+]
 
 
 def publish(

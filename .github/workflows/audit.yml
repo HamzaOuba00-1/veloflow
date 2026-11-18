@@ -1,0 +1,37 @@
+# Known vulnerabilities in the locked dependencies (pip-audit, PyPI advisory
+# database). Runs on every change of the lock file and once a week, because a
+# new advisory can concern a version that has not changed.
+name: Audit
+
+on:
+  push:
+    branches: [main]
+    paths: [uv.lock, pyproject.toml, .github/workflows/audit.yml]
+  pull_request:
+    paths: [uv.lock, pyproject.toml, .github/workflows/audit.yml]
+  schedule:
+    - cron: "17 5 * * 1" # Mondays, 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+
+      # Every group (runtime, app, dev) as locked, with hashes: pip-audit checks
+      # exactly what is installed, without resolving anything itself.
+      - name: Export the locked dependencies
+        run: uv export --frozen --no-emit-project --all-groups -o requirements.txt
+
+      - name: Audit them
+        run: uvx pip-audit==2.10.1 -r requirements.txt --disable-pip --progress-spinner off

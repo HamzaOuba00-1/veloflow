@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moves to a new release on its own
     timeout-minutes: 15
     steps:
       # Third-party actions are pinned to a full commit SHA: a tag can be moved
@@ -52,7 +52,7 @@ jobs:
     # The serving image builds and both services start (no data: the API
     # answers 503 on /health, which proves it runs; the app answers its own
     # health check).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

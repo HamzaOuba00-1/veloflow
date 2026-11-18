@@ -19,6 +19,9 @@ described by files in this repository.
 | `infra/vm/veloflow-predict.timer` | Runs it every 10 minutes (minutes 2, 12, 22…) |
 | `infra/gcp/create_forecast_bucket.ps1` | Creates the public bucket and the VM's service account (run from the laptop) |
 | `Dockerfile`, `infra/gcp/deploy_cloud_run.ps1` | Image of the API and the app, built by Cloud Build and deployed on Cloud Run |
+| `infra/gcp/enable_secure_boot.ps1` | Turns on Secure Boot on the existing VM (stops it for about two minutes) |
+| `infra/gcp/create_training.ps1`, `rollback_model.ps1` | Weekly retraining: buckets, identities, Cloud Run job, schedule; going back to the previous model |
+| `infra/vm/veloflow-share.*` | Shares the recent silver days with the training job every night |
 | `infra/gcp/harden_project.ps1` | Removes Editor from the Compute Engine default account and closes SSH to the internet (run once from the laptop) |
 
 ## VM settings and why
@@ -30,6 +33,7 @@ described by files in this repository.
 | Network | Standard tier, ephemeral IP | Needed to reach the feed; no charge for the IP on the free tier |
 | Identity | Service account `veloflow-publisher`, scope Cloud Storage only | Its one role, `objectUser` on the forecast bucket, lets the VM replace `forecasts.json` and nothing else; no key file exists |
 | Protection | Deletion protection | The disk holds the only copy of the raw archive |
+| Boot | Shielded VM: Secure Boot, vTPM, integrity monitoring (`enable_secure_boot.ps1` on an existing VM) | Only a signed bootloader and kernel start; a changed boot is reported |
 | SSH | Port 22 open to the IAP range `35.235.240.0/20` only (`default-allow-ssh` and `default-allow-rdp` disabled) | Nobody on the internet can reach the SSH server; access goes through Google sign-in, hence `--tunnel-through-iap` on every `gcloud compute ssh` / `scp` |
 | Updates | `unattended-upgrades`, daily, no automatic reboot | Security fixes without a manual step; the collector never restarts on its own |
 | Swap | 1 GB file, `vm.swappiness=10` | 1 GB of RAM, ~600 MB available after the OS |
@@ -113,8 +117,9 @@ metadata server, then a multipart upload. The object is stored gzipped (about
 copy cached by Google's edge for an hour. An upload replaces the object at
 once: readers see the old document or the new one, never half of one.
 
-After each training on the laptop, copy the model and its card (when, on what
-data, which version of the code; read with the model) to the VM:
+The model in service comes from the registry, retrained every week (see
+"Weekly retraining" below). Before the registry existed, or to put a model
+trained on the laptop in service by hand, copy it and its card to the VM:
 
 ```powershell
 gcloud compute scp --tunnel-through-iap data/models/lightgbm.pkl data/models/lightgbm.json veloflow-collector:.
@@ -172,6 +177,72 @@ same for about 18 USD a month, which the free-tier rule excludes. The
 
 After the switch, check that a page loads and that its controls react (Streamlit talks to the server over a WebSocket).
 
+## Weekly retraining (champion and challenger)
+
+```text
+VM, 00:50 UTC ─ veloflow-share-data ─▶ gs://veloflow-data-513808 (silver days, station references)
+                                              │
+Cloud Scheduler, Mondays 03:13 UTC ─▶ Cloud Run job veloflow-train (veloflow-retrain)
+                                              │  challenger vs champion on the last 7 days
+                                              ▼
+                                 gs://veloflow-models-513808: versions/<v>/, champion.json
+                                              │
+VM, every 10 min ─ veloflow-predict ◀─────────┘  downloads a new champion once
+```
+
+Once, from the laptop, after `deploy_cloud_run.ps1` (the job runs the same
+image):
+
+```powershell
+.\infra\gcp\create_training.ps1 -WhatIf
+.\infra\gcp\create_training.ps1
+```
+
+It creates the two private buckets, the job's identity (`veloflow-trainer`:
+reads the data bucket, writes the registry), the schedule's identity
+(`veloflow-scheduler`: may start the job, nothing else), gives the VM's
+account write access to the data bucket and read access to the registry,
+deploys the job (2 vCPU, 8 GiB, one hour at most, no retry), schedules it, and
+registers the model now in `data/models` as the first champion. Then add
+`VELOFLOW_DATA_URL` and `VELOFLOW_MODELS_URL` to `/etc/veloflow/veloflow.env`
+(template: `infra/vm/veloflow.env.example`) and run `setup.sh` again for the
+new timer.
+
+Each run (`src/veloflow/models/retrain.py`):
+
+1. downloads the shared days of the last five weeks and their archived
+   weather forecasts;
+2. takes as **holdout** the last seven complete Paris days after the
+   champion's data, data that no model has seen;
+3. trains a **challenger** on the 28 days before the holdout, with the
+   champion's settings;
+4. scores the challenger, the champion and persistence with the backtest
+   bench on the holdout (same examples, frozen stations left out);
+5. **promotes** the challenger only if its mean absolute error and its Brier
+   score are both no worse than the champion's (persistence's, without a
+   champion), after refitting it on the latest 28 days. Otherwise the
+   champion stays. Every decision, with its scores, goes into
+   `champion.json` and appears on the Admin page.
+
+`veloflow-predict` reads `champion.json` before each run and downloads a new
+version once (card first, model last, then a `VERSION` file). If the registry
+cannot be read, the local model stays in service: the forecasts never stop
+for it.
+
+Run the job now, and go back to the previous model if needed (the VM follows
+within 10 minutes):
+
+```powershell
+gcloud run jobs execute veloflow-train --region=us-east1 --wait
+gcloud run jobs executions list --job=veloflow-train --region=us-east1
+.\infra\gcp\rollback_model.ps1 -WhatIf
+.\infra\gcp\rollback_model.ps1
+```
+
+Free-tier budget: about 20 minutes of a 2 vCPU job a week (Cloud Run: 180,000
+vCPU-seconds free a month), 1 of the 3 free Cloud Scheduler jobs, about 25
+uploads a week to the data bucket, which deletes objects after 60 days.
+
 ## Getting the data on the laptop
 
 ```powershell
@@ -194,6 +265,12 @@ the silver layer can be rebuilt from. A file is downloaded only when it is
 missing or its size changed, under a `.part` name first, then renamed: an
 interrupted run never leaves a truncated file behind. Running it twice in a row
 downloads nothing the second time.
+
+Do not run `veloflow-compact --all` on the laptop after a pull: the VM
+compacts every night, and the laptop only holds partial raw files of a few
+days, so the compaction would rebuild those days from them and replace
+complete silver files (it happened on 18 November; a second pull restores
+them, since their size no longer matches the VM's).
 
 ## Monitoring
 
@@ -224,7 +301,6 @@ never logged. Template: `infra/vm/veloflow.env.example`.
 
 - Kernel updates are installed automatically but wait for a manual reboot:
   `gcloud compute ssh --tunnel-through-iap veloflow-collector --command="cat /var/run/reboot-required 2>/dev/null || echo none"`.
-  Planned hardening: Secure Boot.
 - The external IP may change after a VM restart; `gcloud compute ssh` finds the
   VM by name, so nothing depends on it.
 - The model is copied by hand after each training; the API's `/health` shows

@@ -10,10 +10,20 @@ For each horizon, on every station at once:
   calibrated by isotonic regression on the most recent 20 % of the training
   origins, held out from the classifiers;
 * 80 % intervals of the counts by split conformal prediction: the regressors
-  learn on the older 80 % of the origins; on the newest 20 %, ``k`` is the
-  smallest whole number such that ``rounded forecast ± k`` holds 80 % of the
-  targets (finite-sample corrected). Counts are whole numbers, so coverage
-  moves in steps and can land above 80 %.
+  learn on the older 80 % of the origins; the newest 20 % give the errors
+  ``target - rounded forecast``. Counts are whole numbers, so a symmetric
+  ``± k`` jumps past 80 % (``± 0`` holds 60 %, ``± 1`` 90 %). Two refinements
+  (``interval_method``):
+
+  - ``asymmetric``: the narrowest ``[forecast - a, forecast + b]`` that holds
+    80 % of the errors (finite-sample corrected), ``a`` and ``b`` chosen apart;
+  - ``mondrian`` (default): the same, per group of examples (Mondrian
+    conformal prediction). The group is how much the count moved in the hour
+    before the origin (0, 1 to 2, 3 or more): a quiet station needs a narrow
+    interval, a busy one a wide one. A group with fewer than
+    ``MIN_GROUP_EXAMPLES`` errors uses the bounds of all groups together.
+
+  ``symmetric`` keeps ``± k``, for comparison.
 
 Features: ``features.build`` plus the station profile (mean state and event
 frequencies on the same type of day and slot, at the origin and at the
@@ -51,6 +61,12 @@ MODEL_COLUMNS: tuple[str, ...] = (
 )
 CALIBRATION_SHARE = 0.2
 INTERVAL_LEVEL = 0.8
+INTERVAL_METHODS: tuple[str, ...] = ("symmetric", "asymmetric", "mondrian")
+# Mondrian groups: change of the count over the hour before the origin.
+ACTIVITY_LAG_MIN = 60
+ACTIVITY_EDGES: tuple[int, ...] = (1, 3)  # |change| 0 | 1-2 | 3+
+POOLED = -1  # the group of every example, used when a group is too small
+MIN_GROUP_EXAMPLES = 500
 
 
 def daily_profile_sums(states: pl.DataFrame) -> pl.DataFrame:
@@ -131,6 +147,73 @@ class _HorizonModels:
     classifiers: dict[str, lgb.LGBMClassifier | float] = field(default_factory=dict)
     calibrators: dict[str, IsotonicRegression | None] = field(default_factory=dict)
     half_widths: dict[str, float] = field(default_factory=dict)
+    # Interval offsets per count and group: (below, above) the rounded forecast.
+    bounds: dict[str, dict[int, tuple[float, float]]] = field(default_factory=dict)
+
+
+def activity_group(change: pl.Expr) -> pl.Expr:
+    """Mondrian group of an example: 0, 1 or 2 by the absolute change of the last hour.
+
+    An unknown change (station seen for less than an hour) is group 0.
+    """
+    moved = change.abs().fill_null(0)
+    group = pl.lit(0, dtype=pl.Int8)
+    for index, edge in enumerate(ACTIVITY_EDGES, start=1):
+        group = pl.when(moved >= edge).then(pl.lit(index, dtype=pl.Int8)).otherwise(group)
+    return group
+
+
+def conformal_bounds(errors: np.ndarray, level: float = INTERVAL_LEVEL) -> tuple[float, float]:
+    """Narrowest ``(a, b)`` such that ``-a <= error <= b`` on a share ``level`` of new cases.
+
+    Errors are whole numbers. The interval must hold at least the
+    ``ceil((n + 1) * level)``-th error (the split conformal rank); among the
+    narrowest ones, the one holding the fewest errors, the closest to
+    ``level``. Infinite when there are too few errors.
+    """
+    n = len(errors)
+    rank = int(np.ceil((n + 1) * level))
+    if rank > n:
+        return float("inf"), float("inf")
+    values = np.round(errors).astype(np.int64)
+    low, high = int(values.min()), int(values.max())
+    counts = np.cumsum(np.bincount(values - low, minlength=high - low + 1))
+
+    def held(a: int, b: int) -> int:  # errors in [-a, b]
+        top = min(b, high) - low
+        bottom = max(-a, low) - low - 1
+        if top < 0 or top <= bottom:
+            return 0
+        return int(counts[top] - (counts[bottom] if bottom >= 0 else 0))
+
+    best: tuple[int, int, int, int] | None = None  # (width, held, a, b)
+    for a in range(max(0, -low) + 1):
+        b = 0
+        while held(a, b) < rank and b < max(0, high):
+            b += 1
+        if held(a, b) < rank:
+            continue
+        candidate = (a + b, held(a, b), a, b)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    assert best is not None  # a = -low, b = high hold every error
+    return float(best[2]), float(best[3])
+
+
+def interval_bounds(
+    errors: np.ndarray, groups: np.ndarray, method: str, level: float = INTERVAL_LEVEL
+) -> dict[int, tuple[float, float]]:
+    """Offsets below and above the forecast, for every group (``POOLED``: all of them)."""
+    if method == "symmetric":
+        k = conformal_half_width(errors, level)
+        return {POOLED: (k, k)}
+    bounds = {POOLED: conformal_bounds(errors, level)}
+    if method == "mondrian":
+        for group in np.unique(groups):
+            mask = groups == group
+            if mask.sum() >= MIN_GROUP_EXAMPLES:
+                bounds[int(group)] = conformal_bounds(errors[mask], level)
+    return bounds
 
 
 def conformal_half_width(errors: np.ndarray, level: float = INTERVAL_LEVEL) -> float:
@@ -158,8 +241,12 @@ class GradientBoosting:
         max_rows_per_horizon: int = 400_000,
         params: dict[str, object] | None = None,
         seed: int = 0,
+        interval_method: str = "mondrian",
     ) -> None:
-        """Set the static context and the training budget."""
+        """Set the static context, the training budget and how intervals are built."""
+        if interval_method not in INTERVAL_METHODS:
+            raise ValueError(f"interval_method must be one of {INTERVAL_METHODS}")
+        self.interval_method = interval_method
         self.context = context
         self.max_rows = max_rows_per_horizon
         self.params = default_params() if params is None else params
@@ -194,7 +281,8 @@ class GradientBoosting:
             .cast(pl.Float64)
             .alias("capacity")
         )
-        examples = data.examples()
+        # Built and sampled one day at a time: memory follows the budget.
+        examples = data.sampled_examples(self.max_rows, seed=self.seed)
         self.models = {}
         self.trained_examples = {}
         for horizon in HORIZONS_MIN:
@@ -231,7 +319,15 @@ class GradientBoosting:
                     np.maximum(state + np.asarray(regressor.predict(x[split:])), 0.0), cap
                 )
                 target = held_out[f"y_{name}"].cast(pl.Float64).to_numpy()
-                models.half_widths[name] = conformal_half_width(target - np.round(forecast))
+                errors = target - np.round(forecast)
+                groups = (
+                    frame[split:]
+                    .select(activity_group(pl.col(f"d_{name}_{ACTIVITY_LAG_MIN}")))
+                    .to_series()
+                    .to_numpy()
+                )
+                models.half_widths[name] = conformal_half_width(errors)
+                models.bounds[name] = interval_bounds(errors, groups, self.interval_method)
             for event in EVENTS:
                 y = subset[f"y_{event}"].to_numpy().astype(np.int8)
                 if y[:split].min() == y[:split].max():
@@ -268,6 +364,42 @@ class GradientBoosting:
             .select(self.sums.columns)
         )
 
+    def _bounds_of(self, models: _HorizonModels, name: str) -> dict[int, tuple[float, float]]:
+        """Interval offsets of a count; ``± k`` for a model saved before ``bounds`` existed."""
+        bounds = getattr(models, "bounds", {}).get(name)
+        if bounds:
+            return dict(bounds)
+        k = models.half_widths.get(name, float("inf"))
+        return {POOLED: (k, k)}
+
+    def _with_bounds(self, frame: pl.DataFrame) -> pl.DataFrame:
+        """Add ``a_<count>`` and ``b_<count>``: offsets below and above, per row's group."""
+        groups = range(len(ACTIVITY_EDGES) + 1)
+        for name in TARGETS:
+            rows = []
+            for horizon, models in self.models.items():
+                bounds = self._bounds_of(models, name)
+                for group in groups:
+                    below, above = bounds.get(group, bounds[POOLED])
+                    rows.append((horizon, group, below, above))
+            table = pl.DataFrame(
+                rows,
+                schema={
+                    "horizon_min": pl.Int16,
+                    f"g_{name}": pl.Int8,
+                    f"a_{name}": pl.Float64,
+                    f"b_{name}": pl.Float64,
+                },
+                orient="row",
+            )
+            frame = frame.join(
+                table, on=["horizon_min", f"g_{name}"], how="left", maintain_order="left"
+            ).with_columns(
+                pl.col(f"a_{name}").fill_null(float("inf")),
+                pl.col(f"b_{name}").fill_null(float("inf")),
+            )
+        return frame
+
     def predict(self, history: pl.DataFrame, examples: pl.DataFrame) -> pl.DataFrame:
         """Forecast counts and event probabilities of ``examples``."""
         if self.sums is None or self.capacity is None:
@@ -300,9 +432,13 @@ class GradientBoosting:
                         p = np.asarray(calibrator.predict(p))
                 columns[f"p_{event}"] = p
             parts.append(
-                part.select("_row", *KEYS, *TARGETS, "cap").with_columns(
-                    [pl.Series(k, v, dtype=pl.Float64) for k, v in columns.items()]
-                )
+                part.select(
+                    "_row",
+                    *KEYS,
+                    *TARGETS,
+                    "cap",
+                    *[f"d_{n}_{ACTIVITY_LAG_MIN}" for n in TARGETS],
+                ).with_columns([pl.Series(k, v, dtype=pl.Float64) for k, v in columns.items()])
             )
         if not parts:
             return examples.select(KEYS).with_columns(
@@ -323,17 +459,10 @@ class GradientBoosting:
                 for name in TARGETS
             ]
         )
-        widths = pl.DataFrame(
-            [
-                {
-                    "horizon_min": h,
-                    **{f"k_{n}": m.half_widths.get(n, float("inf")) for n in TARGETS},
-                }
-                for h, m in self.models.items()
-            ],
-            schema={"horizon_min": pl.Int16, **{f"k_{n}": pl.Float64 for n in TARGETS}},
+        forecasts = forecasts.with_columns(
+            [activity_group(pl.col(f"d_{n}_{ACTIVITY_LAG_MIN}")).alias(f"g_{n}") for n in TARGETS]
         )
-        forecasts = forecasts.join(widths, on="horizon_min", how="left", maintain_order="left")
+        forecasts = self._with_bounds(forecasts)
         return forecasts.select(
             *KEYS,
             *[f"pred_{name}" for name in TARGETS],
@@ -343,11 +472,11 @@ class GradientBoosting:
                 expr
                 for name in TARGETS
                 for expr in (
-                    (pl.col(f"pred_{name}").round() - pl.col(f"k_{name}"))
+                    (pl.col(f"pred_{name}").round() - pl.col(f"a_{name}"))
                     .clip(lower_bound=0.0)
                     .alias(f"lo_{name}"),
                     pl.min_horizontal(
-                        pl.col(f"pred_{name}").round() + pl.col(f"k_{name}"), pl.col("cap")
+                        pl.col(f"pred_{name}").round() + pl.col(f"b_{name}"), pl.col("cap")
                     ).alias(f"hi_{name}"),
                 )
             ],

@@ -1,0 +1,25 @@
+[Unit]
+Description=VeloFlow: share the recent silver days with the weekly training job
+Documentation=https://github.com/HamzaOuba00-1/veloflow/blob/main/docs/deployment.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=veloflow
+Group=veloflow
+WorkingDirectory=/opt/veloflow/app
+# The bucket comes from VELOFLOW_DATA_URL in the env file; without it, nothing is sent.
+ExecStart=/opt/veloflow/app/.venv/bin/veloflow-share-data --data-dir /var/lib/veloflow
+EnvironmentFile=-/etc/veloflow/veloflow.env
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=10min
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/veloflow
+# Reads one file at a time (about 3 MB).
+MemoryMax=200M

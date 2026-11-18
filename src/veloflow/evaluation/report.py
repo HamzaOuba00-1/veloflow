@@ -14,14 +14,15 @@ from pathlib import Path
 
 import polars as pl
 
-from veloflow.datasets import (
-    load_station_information,
-    load_station_status,
-    load_weather_15min,
-    silver_days,
-)
+from veloflow.datasets import load_station_information, load_weather_15min, silver_days
 from veloflow.evaluation.acceptance import Check, check_acceptance
-from veloflow.evaluation.backtest import BacktestResult, run_backtest
+from veloflow.evaluation.backtest import (
+    TRAIN_DAYS,
+    BacktestResult,
+    SilverSource,
+    quality_masks,
+    run_backtest,
+)
 from veloflow.evaluation.examples import EXCLUSION_REASONS, TARGETS
 from veloflow.evaluation.metrics import all_metrics, regression_metrics, with_groups
 from veloflow.evaluation.subgroups import SUBGROUPS, add_subgroups, subgroup_ratios
@@ -211,15 +212,23 @@ def render(
 
 
 def run(
-    data_dir: Path, start: date, end: date, models: list[Forecaster]
+    data_dir: Path,
+    start: date,
+    end: date,
+    models: list[Forecaster],
+    train_days: int | None = TRAIN_DAYS,
 ) -> tuple[str, pl.DataFrame]:
     """Backtest ``models`` on the silver days ``start`` to ``end`` (UTC).
+
+    The silver files are read a window at a time; the quality masks are
+    computed once and shared by every model.
 
     Returns:
         The Markdown report, and every metric by model and horizon.
     """
-    status = load_station_status(data_dir, start, end).frame
-    results = [run_backtest(model, status) for model in models]
+    source = SilverSource(data_dir, start, end)
+    masks = quality_masks(source)
+    results = [run_backtest(model, source, masks=masks, train_days=train_days) for model in models]
     if not results[0].folds:
         raise ValueError(f"no complete test day between {start} and {end}")
     metrics = {result.model: all_metrics(headline(result)) for result in results}
@@ -251,6 +260,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--baselines-only", action="store_true", help="skip LightGBM (seconds instead of minutes)"
     )
+    parser.add_argument(
+        "--train-days",
+        type=int,
+        default=TRAIN_DAYS,
+        help=f"days of history each model learns from (default {TRAIN_DAYS})",
+    )
     return parser.parse_args(argv)
 
 
@@ -265,7 +280,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     start, end = args.start or days[0], args.end or days[-1]
     try:
         models = baselines() if args.baselines_only else all_models(args.data_dir)
-        report, metrics = run(args.data_dir, start, end, models)
+        report, metrics = run(args.data_dir, start, end, models, args.train_days)
     except ValueError as error:
         logger.error("%s", error)
         return 1

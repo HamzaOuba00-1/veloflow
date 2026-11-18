@@ -84,6 +84,19 @@ Step "deploy veloflow-app from the same image" {
         --memory=1Gi --session-affinity --timeout=3600 @common
 }
 
+# The weekly training job (create_training.ps1) runs the same image: it moves
+# with it, or the registry clean-up below would delete the image it runs.
+$job = gcloud run jobs list --project=$Project --region=$Region --filter="metadata.name=veloflow-train" `
+    --format="value(metadata.name)"
+if ($job) {
+    Step "point the training job veloflow-train to the new image" {
+        $image = gcloud run services describe veloflow-api --project=$Project --region=$Region `
+            --format="value(spec.template.spec.containers[0].image)"
+        Invoke-Gcloud run jobs update veloflow-train --project=$Project --region=$Region `
+            --image=$image --quiet
+    }
+}
+
 Step "keep the last two images in $Repository" {
     Invoke-Gcloud artifacts repositories set-cleanup-policies $Repository `
         --project=$Project --location=$Region `

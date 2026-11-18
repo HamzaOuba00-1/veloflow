@@ -51,8 +51,11 @@ flowchart LR
   P -- "forecasts.json<br/>(gzip, no-cache)" --> GCS[("Cloud Storage<br/>public object")]
   GCS --> API["FastAPI<br/>(Cloud Run)"]
   GCS --> APP["Streamlit app<br/>(Cloud Run,<br/>veloflow.spaceh.online)"]
-  RAW -. "pull_data.ps1" .-> LAP["laptop: Parquet, EDA,<br/>backtest, training"]
-  LAP -. "copy model" .-> M
+  RAW -- "silver days,<br/>every night" --> DATA[("Cloud Storage<br/>private data")]
+  DATA --> JOB["Cloud Run job, Mondays:<br/>challenger vs champion"]
+  JOB -- "promoted only<br/>if better" --> REG[("model registry<br/>champion.json")]
+  REG -- "new champion" --> M
+  RAW -. "pull_data.ps1" .-> LAP["laptop: EDA,<br/>backtest"]
 ```
 
 1. **Collection** ([deployment](docs/deployment.md)): the feed is fetched
@@ -85,8 +88,9 @@ Cards and status: [model card](docs/cards/model_card.md) ·
 | Machine learning | LightGBM, scikit-learn | Gradient-boosted forecasts per horizon, isotonic calibration, split-conformal intervals |
 | Evaluation | Own rolling-origin backtest | Persistence and profile baselines, look-ahead test, MAE, Brier, calibration, coverage |
 | Serving | FastAPI, Uvicorn, Streamlit, pydeck, Altair | REST API with OpenAPI docs; web app with maps and charts, desktop and phone layouts |
-| Cloud (Google Cloud) | Compute Engine, Cloud Storage, Cloud Run, Cloud Build, Artifact Registry, IAM, Identity-Aware Proxy | VM running 24/7, public forecast document, two services scaled to zero, image built from the sources, one service account per job, SSH without an open port |
-| Delivery | Docker, GitHub Actions, uv, systemd | One image for the API and the app, CI on every push, locked dependencies, sandboxed services on the VM |
+| Cloud (Google Cloud) | Compute Engine (Shielded VM), Cloud Storage, Cloud Run services and jobs, Cloud Scheduler, Cloud Build, Artifact Registry, IAM, Identity-Aware Proxy | VM running 24/7, public forecast document, two services scaled to zero, weekly training job, image built from the sources, one service account per job, SSH without an open port |
+| MLOps | Model registry in Cloud Storage, champion/challenger | Weekly retraining, promotion only when no worse on the holdout, every decision recorded, one-command rollback |
+| Delivery | Docker, GitHub Actions, Dependabot, pip-audit, uv, systemd | One image for the API, the app and the training job, CI on every push, weekly dependency updates and vulnerability audit, locked dependencies, sandboxed services on the VM |
 | Quality | pytest, mypy `--strict`, ruff, pre-commit | Tests and static checks run locally and in CI |
 | Operations | healthchecks.io, Cloud Billing budget, custom domain with managed TLS | Alerts when a job stops, cost guard at 1 USD a month, `veloflow.spaceh.online` |
 
@@ -111,6 +115,9 @@ Backtest on 9-10 November 2026 (rolling origin, frozen stations left out):
   calibrated persistence, with the same calibration.
 - **Intervals** are valid but too wide (82.7-90.5 % coverage for 80 %):
   counts are whole numbers, and `± 0` to `± 1` jumps past the target.
+  Per-group (Mondrian) bounds, chosen apart below and above, now narrow them
+  by 18 % on 13-17 November (coverage 82.1-87.0 %, against 82.5-94.1 % for
+  `± k`; [details](docs/models/gbm.md)).
 - **Subgroups** (suburbs, peak hours, rain) do not degrade more than 15 %.
 - LightGBM passes **21 of 38** acceptance checks.
 - In production: 1,496 stations forecast in 25 s on the VM (360 MB peak);
@@ -152,13 +159,24 @@ uv run veloflow-predict --data-dir data           # forecast now -> data/serving
 - Infrastructure as code (`infra/`): VM setup, systemd units with memory caps
   and sandboxing, bucket, Cloud Run deployment, custom domain, project
   hardening. Every script has a `-WhatIf` dry run and can be run twice.
+- Weekly retraining (MLOps): every Monday a Cloud Run job trains a
+  challenger on the last four weeks and scores it against the model in
+  service on the seven days that model never saw, with the same backtest
+  bench. It goes into service only if its mean absolute error and its Brier
+  score are both no worse; every decision is recorded and shown on the Admin
+  page, and `rollback_model.ps1` puts the previous model back.
 - Least privilege, one identity per job:
-  - the VM can replace one file in one bucket, and nothing else;
+  - the VM can replace the forecast document, share its recent data and read
+    the model registry, and nothing else;
+  - the training job reads the shared data and writes the registry; the
+    schedule may only start the job;
   - the API and the app run as a service account with no role at all;
   - the image build holds only the Cloud Run builder role;
   - no key file exists; secrets stay in the VM's environment file.
-- Network: SSH only through Identity-Aware Proxy (port 22 closed to the
-  internet); automatic security updates on the VM.
+- Network and host: SSH only through Identity-Aware Proxy (port 22 closed to
+  the internet), Secure Boot, automatic security updates on the VM.
+- Supply chain: GitHub Actions pinned by commit, Dependabot, weekly
+  `pip-audit` of the locked dependencies.
 - Cost: built for the free tier (e2-micro VM, Cloud Storage and Cloud Run in
   us-east1, services scaled to zero), with a 1 USD budget alert. Billing
   checked at 0.00 USD on 10 November 2026, before Cloud Run; next check in
@@ -173,7 +191,7 @@ src/veloflow/
   quality/     versions, operational stations, frozen feeds, coverage
   weather/ context/   Open-Meteo, school holidays, bike counts
   features/    feature grid (lags, profiles, neighbours, weather, calendar)
-  models/      baselines, LightGBM, training, saved artefacts
+  models/      baselines, LightGBM, training, registry, weekly retraining
   evaluation/  examples, rolling-origin backtest, metrics, acceptance criteria
   serving/     live forecast, publication, monitoring, API, app
 infra/         VM (systemd), Google Cloud scripts, data sync
@@ -184,11 +202,10 @@ docs/          data, models, evaluation, serving, deployment
 
 - **Little history**: about a week of data, no summer, no school holidays
   yet. Every result above will be rerun as the history grows.
-- Counts do not beat persistence yet; intervals over-cover (asymmetric or
-  per-group conformal intervals are the next try).
+- Counts do not beat persistence yet; intervals still over-cover a little
+  (82-87 %), to re-check with more history.
 - Not done: "your station is emptying" alerts (F7), rebalancing simulation
-  (F8), data versioning with DVC, champion/challenger with rollback.
-- The model is retrained on the laptop and copied by hand to the VM.
+  (F8), data versioning with DVC.
 
 ## License
 

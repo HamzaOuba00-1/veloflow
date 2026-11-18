@@ -93,7 +93,7 @@ log "systemd units"
 install -m 644 "${APP_DIR}"/infra/vm/veloflow-*.service "${APP_DIR}"/infra/vm/veloflow-*.timer \
     /etc/systemd/system/
 systemctl daemon-reload
-TIMERS=(veloflow-compact.timer veloflow-weather.timer veloflow-predict.timer)
+TIMERS=(veloflow-compact.timer veloflow-weather.timer veloflow-predict.timer veloflow-share.timer)
 systemctl enable --quiet veloflow-collector.service "${TIMERS[@]}"
 # restart, not start: on an update the running collector must load the new code.
 systemctl restart veloflow-collector.service

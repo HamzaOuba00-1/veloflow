@@ -64,6 +64,11 @@ $flags = @(
     # service account and no credentials an attacker could steal from it.
     "--no-service-account",
     "--no-scopes",
+    # Shielded VM: only a signed boot chain starts; vTPM and integrity
+    # monitoring report a boot that differs from the first one. Free.
+    "--shielded-secure-boot",
+    "--shielded-vtpm",
+    "--shielded-integrity-monitoring",
     # The raw archive lives on this disk: no deletion by a mistaken click.
     "--deletion-protection",
     "--labels=app=veloflow,role=collector"

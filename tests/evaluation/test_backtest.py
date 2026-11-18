@@ -1,6 +1,7 @@
 """Tests for the rolling-origin backtest bench."""
 
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import polars as pl
 import pytest
@@ -189,3 +190,74 @@ def test_invalid_predictions_are_refused(edit: object, message: str) -> None:
 
     with pytest.raises(InvalidPredictionError, match=message):
         validate_predictions(examples, edit(predictions))  # type: ignore[operator]
+
+
+# --- Windows: the same results with a fraction of the data in memory -------
+
+
+def _with_frozen_stations(status: pl.DataFrame) -> pl.DataFrame:
+    """``status`` plus station 3, frozen throughout, and station 4, frozen across a midnight."""
+    times = status.filter(pl.col("station_id") == 1).select("fetched_at", "feed_updated_at")
+    span = pl.col("fetched_at").is_between(
+        datetime(2026, 11, 9, 12, tzinfo=UTC), datetime(2026, 11, 10, 18, tzinfo=UTC)
+    )
+    k = pl.int_range(pl.len())
+    extra = pl.concat(
+        [
+            times.with_columns(station_id=pl.lit(3, pl.Int64), mechanical=pl.lit(4, pl.Int16)),
+            times.with_columns(
+                station_id=pl.lit(4, pl.Int64),
+                mechanical=pl.when(span).then(2).otherwise(k % 3).cast(pl.Int16),
+            ),
+        ]
+    ).with_columns(
+        ebike=pl.lit(1, pl.Int16),
+        docks=pl.lit(5, pl.Int16),
+        is_installed=pl.lit(value=True),
+        is_renting=pl.lit(value=True),
+        is_returning=pl.lit(value=True),
+        last_reported=pl.col("fetched_at"),
+        operational=pl.lit(value=True),
+    )
+    return pl.concat([status, extra.select(status.columns)]).sort("fetched_at", "station_id")
+
+
+def test_masks_by_day_equal_one_computation_on_everything(synthetic_status: pl.DataFrame) -> None:
+    from veloflow.evaluation.backtest import FrameSource, quality_masks
+    from veloflow.quality.freeze import (
+        change_counts,
+        frozen_feed_slots,
+        suspected_frozen_stations,
+    )
+
+    status = _with_frozen_stations(synthetic_status)
+    masks = quality_masks(FrameSource(status))
+
+    whole = suspected_frozen_stations(status).drop("daytime_hours")
+    assert whole["station_id"].unique().sort().to_list() == [3, 4]  # the case is exercised
+    assert masks.frozen_stations.drop("daytime_hours").equals(whole)
+    assert masks.frozen_slots.equals(frozen_feed_slots(change_counts(status)))
+    assert masks.fetch_times.height == status["fetched_at"].n_unique()
+
+
+def test_silver_windows_give_the_same_backtest_as_everything_in_memory(
+    synthetic_status: pl.DataFrame, silver_dir: Path
+) -> None:
+    from veloflow.datasets import load_station_status
+    from veloflow.evaluation.backtest import SilverSource
+
+    in_memory = run_backtest(Persistence(), load_station_status(silver_dir).frame)
+    windowed = run_backtest(Persistence(), SilverSource(silver_dir))
+
+    assert windowed.frame.equals(in_memory.frame)
+    assert windowed.folds == in_memory.folds
+
+
+def test_the_training_window_bounds_the_history(synthetic_status: pl.DataFrame) -> None:
+    full = run_backtest(Persistence(), synthetic_status, train_days=None)
+    short = run_backtest(Persistence(), synthetic_status, train_days=1)
+
+    # On 10 November, one day of history instead of two and a half.
+    assert short.folds[-1].train_versions == 24 * 12  # a version every 5 minutes
+    assert full.folds[-1].train_versions > short.folds[-1].train_versions
+    assert short.frame.equals(full.frame)  # persistence needs no history

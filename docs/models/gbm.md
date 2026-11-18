@@ -77,6 +77,35 @@ jumps past 80 % to 86-90 %. No symmetric whole-number interval lands inside
 data: separate lower and upper `k`, or one `k` per group of stations
 (Mondrian conformal prediction).
 
+Both are now implemented (`interval_method`):
+
+- `asymmetric`: the narrowest `[forecast - a, forecast + b]` that holds the
+  conformal rank of the errors, `a` and `b` chosen apart (a count tends to
+  move one way: at 15 minutes `[f, f + 1]` can hold 80 % where `f ± 1` holds
+  90 %);
+- `mondrian`: the same per group of examples, by how much the count moved
+  in the hour before the origin (0, 1 to 2, 3 or more); a group under 500
+  held-out errors uses the pooled bounds;
+- `symmetric`: the former `± k`, kept for comparison.
+
+A model saved before this change still forecasts with its `± k`.
+
+Measured on 18 November 2026: one LightGBM trained on the days before
+13 November, scored on 13-17 November (6.4 million examples, frozen stations
+left out), the three methods on the same forecasts:
+
+| Method | Coverage, lowest to highest (9 horizon x count pairs) | Inside 77-83 % | Mean width |
+|---|---|---|---|
+| symmetric `± k` | 82.5 % to 94.1 % | 1 of 9 | 2.88 |
+| asymmetric | 82.5 % to 90.1 % | 1 of 9 | 2.51 |
+| **mondrian** (default) | 82.1 % to 87.0 % | 2 of 9 | **2.36** |
+
+Mondrian intervals are 18 % narrower on average and never over-cover by more
+than 7 points (14 for `± k`, mechanical bikes at 15 minutes). They still sit
+above 80 %: the held-out errors come from the newest 20 % of the training
+origins, and with few days those are not a typical day. Criterion 4 is
+re-checked as the history grows.
+
 ## Subgroups (criterion 5)
 
 `veloflow.evaluation.subgroups`: suburbs (station code from 21000, except the

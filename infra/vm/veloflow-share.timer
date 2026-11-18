@@ -1,0 +1,11 @@
+[Unit]
+Description=Share VeloFlow data every night, after the compaction
+
+[Timer]
+# 00:50 UTC: the compaction (00:20, about 6 minutes) has written yesterday's day.
+OnCalendar=*-*-* 00:50:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -31,6 +31,7 @@ from veloflow.serving.admin import (
     events_html,
     health_html,
     models_html,
+    training_html,
 )
 from veloflow.serving.landing import (
     FEATURES,
@@ -873,6 +874,9 @@ def _admin(st: Any, document: dict[str, Any]) -> None:
     st.html(accuracy_html(monitoring))
     st.html(events_html(monitoring))
     st.html(models_html(monitoring))
+    training = training_html(monitoring)
+    if training:
+        st.html(training)
 
 
 def _about(st: Any, document: dict[str, Any]) -> None:

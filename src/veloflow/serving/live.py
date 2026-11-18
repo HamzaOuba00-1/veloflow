@@ -25,9 +25,11 @@ from veloflow.collector.service import MAX_REJECTED_SHARE, STATUS_FEED
 from veloflow.collector.storage import STATUS_OK, RawArchive, iter_records
 from veloflow.datasets import load_station_information, resample_status
 from veloflow.evaluation.examples import HORIZONS_MIN, TARGETS
+from veloflow.gcs import Storage
 from veloflow.models.artifact import ModelCard, load_model
 from veloflow.models.base import INPUT_COLUMNS
 from veloflow.models.gbm import INTERVAL_LEVEL, GradientBoosting
+from veloflow.models.registry import Registry, sync_champion
 from veloflow.quality.versions import select_versions, with_operational
 from veloflow.serving.monitor import Monitor
 from veloflow.serving.publish import publish
@@ -42,6 +44,8 @@ logger = logging.getLogger(__name__)
 WINDOW_MIN = 70
 PREFIX = '{"fetched_at": "'
 PUBLISH_ENV = "VELOFLOW_PUBLISH_URL"
+MODELS_ENV = "VELOFLOW_MODELS_URL"
+TRAINING_RUNS_SHOWN = 5  # decisions of the training job in the document
 STEP = "5m"
 
 
@@ -253,6 +257,43 @@ def write_document(document: dict[str, Any], path: Path) -> bytes:
     return payload
 
 
+def champion_from(url: str, folder: Path) -> dict[str, Any] | None:
+    """Bring the registry's champion into ``folder``; ``champion.json``, or None.
+
+    The registry must never stop the forecasts: when it cannot be read, the
+    model already in ``folder`` stays in service.
+    """
+    storage = Storage()
+    try:
+        return sync_champion(Registry(storage, url), folder)
+    except Exception:
+        logger.exception("model registry unreachable; the local model stays in service")
+        return None
+    finally:
+        storage.close()
+
+
+def training_summary(pointer: dict[str, Any]) -> dict[str, Any]:
+    """The champion and the last decisions of the training job, for the Admin page."""
+    runs = []
+    for entry in reversed(pointer.get("history", [])[-TRAINING_RUNS_SHOWN:]):
+        scores = entry.get("scores", {})
+        reference = scores.get(entry.get("against", ""), {})
+        challenger = scores.get("challenger", {})
+        runs.append(
+            {
+                "version": entry.get("version"),
+                "at": entry.get("at"),
+                "decision": entry.get("decision"),
+                "against": entry.get("against"),
+                "holdout_days": len(entry.get("holdout", [])),
+                "mae": [challenger.get("mae"), reference.get("mae")],
+                "brier": [challenger.get("brier"), reference.get("brier")],
+            }
+        )
+    return {"current": pointer.get("current"), "previous": pointer.get("previous"), "runs": runs}
+
+
 def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> int:
     """Forecast now and write the JSON document."""
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -266,8 +307,15 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
         default=os.environ.get(PUBLISH_ENV) or None,
         help=f"also upload the document there, as the VM's service account (env {PUBLISH_ENV})",
     )
+    parser.add_argument(
+        "--models-url",
+        metavar="gs://BUCKET",
+        default=os.environ.get(MODELS_ENV) or None,
+        help=f"model registry: download a new champion before forecasting (env {MODELS_ENV})",
+    )
     args = parser.parse_args(argv)
     moment = now or datetime.now(UTC)
+    pointer = champion_from(args.models_url, args.model.parent) if args.models_url else None
     model, card = load_model(args.model)
     recent = read_recent(args.data_dir, moment)
     weather = latest_weather(args.data_dir, moment)
@@ -288,6 +336,8 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
         )
     except Exception:  # monitoring must never stop the forecasts from being published
         logger.exception("monitoring failed; the document is published without it")
+    if pointer is not None and "status" in document:
+        document["status"]["training"] = training_summary(pointer)
     payload = write_document(document, args.out)
     logger.info("%d stations forecast at %s", len(document["stations"]), document["origin"])
     if args.publish:
