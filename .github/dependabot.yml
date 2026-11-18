@@ -28,3 +28,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    ignore:
+      # The project pins Python 3.12 (requires-python, uv.lock, the VM): a new
+      # Python version is a decision of its own, not a weekly update.
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
