@@ -1,4 +1,4 @@
-<img src="docs/images/logo.png" alt="VéloFlow logo" width="96" align="right">
+<img src="docs/images/logo.png" alt="VéloFlow logo" width="76" align="right">
 
 # VéloFlow
 
