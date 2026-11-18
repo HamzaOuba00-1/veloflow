@@ -622,10 +622,20 @@ def _map(
         if selected is not None:
             st.html(
                 station_head_html(selected)
-                + f'<div class="vf-subtitle"><b>Forecast in {horizon} min</b>'
-                "<small>tap a station on the map</small></div>"
-                + count_cards_html(selected, horizon)
-                + risk_cards_html(selected, horizon)
+                + '<div class="vf-subtitle"><small>tap a station on the map</small></div>'
+            )
+            # The card has its own horizon, 15 min first, like the Station page:
+            # the map's "In" choice colours the map, this one details one station.
+            card_h = st.radio(
+                "Forecast",
+                horizons([selected]),
+                horizontal=True,
+                key="map_card_h",
+                format_func=lambda h: f"In {h} min",
+            )
+            st.html(
+                count_cards_html(selected, card_h)
+                + risk_cards_html(selected, card_h)
                 + horizon_table_html(selected)
             )
             st.button(

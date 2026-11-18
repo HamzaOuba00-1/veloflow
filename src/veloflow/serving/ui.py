@@ -376,8 +376,9 @@ def risk_cards_html(station: dict[str, Any], horizon: str) -> str:
         f'<div class="vf-risk-label">{label}</div>{_bar(p, risk_colour(p))}</div>'
         for label, p in (
             # Say what the rider cannot do, not the operator's word ("empty", "full").
-            (f"Risk of no bike left in {horizon} min", forecast["p_empty"]),
-            (f"Risk of no free dock in {horizon} min", forecast["p_full"]),
+            # The horizon is already shown next to the cards, by a choice or a heading.
+            ("Risk of no bike left", forecast["p_empty"]),
+            ("Risk of no free dock", forecast["p_full"]),
         )
     )
     return f'<div class="vf-risks">{cards}</div>'
