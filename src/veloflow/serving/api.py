@@ -196,7 +196,7 @@ def create_app(store: ForecastStore) -> FastAPI:
                 station_id=o["station"]["station_id"],
                 name=o["station"]["name"],
                 distance_m=o["distance_m"],
-                probability=o["probability"],
+                probability=round(o["probability"], 3),
                 now=Counts(**o["station"]["now"]),
             )
             for o in options_near(store.stations(), lat, lon, need, horizon, radius_m)

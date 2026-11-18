@@ -15,12 +15,11 @@ from html import escape
 from typing import Any
 
 from veloflow.serving import theme
-from veloflow.serving.queries import Need
+from veloflow.serving.queries import Need, chance
 from veloflow.serving.ui import (
     ACCENT,
     GITHUB,
     brand_html,
-    chance,
     colour,
     hex_colour,
     horizons,
@@ -31,7 +30,6 @@ from veloflow.serving.ui import (
     risk_cards_html,
     series,
     station_head_html,
-    updated_at,
 )
 
 # Optional photos: file stem in static/images -> what the fallback shows.
@@ -45,8 +43,8 @@ FEATURES = {
     "Map": (
         "map",
         "Live forecast map",
-        "Every station coloured by its chance of a bike, or of a free dock, at the horizon "
-        "you choose. Tap a station for its full forecast.",
+        "Every station coloured by its chance of a bike, or of a free dock. Tap a station "
+        "for its forecast in 15, 30 or 60 minutes.",
         "Open the map",
     ),
     "Go now": (
@@ -59,15 +57,15 @@ FEATURES = {
     "At risk": (
         "alert",
         "Stations at risk",
-        "The stations most likely to run out of bikes, or to fill up, ranked so you can "
+        "The stations most likely to have no bike left, or no free dock, ranked so you can "
         "steer clear of them.",
         "See the ranking",
     ),
     "Station": (
         "pin",
         "Station page",
-        "Counts and their likely range at every horizon, the risk of empty or full, and "
-        "how availability is expected to move.",
+        "Counts and their likely range, the risk of no bike left or no free dock, and "
+        "how availability is expected to move over the next hour.",
         "Open a station",
     ),
 }
@@ -107,17 +105,11 @@ def network_map_uri(stations: list[dict[str, Any]], need: Need, horizon: str) ->
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
 
-def hero_text_html(document: dict[str, Any], status: str) -> str:
-    """Live pill, headline and lead of the hero."""
+def hero_text_html(document: dict[str, Any]) -> str:
+    """Headline and lead of the hero (the header's pill says how fresh the data is)."""
     stations = document["stations"]
-    live = (
-        "Delayed data" if status == "stale" else f"Live forecasts · updated {updated_at(document)}"
-    )
-    dot = ' style="background:var(--vf-color-warning);animation:none"' if status == "stale" else ""
     return (
-        f'<div class="vf-hero-text"><span class="vf-pill"><span class="vf-dot"{dot}></span>'
-        f"{escape(live)}</span>"
-        '<h1 class="vf-display">Know before<br>you <em>go</em>.</h1>'
+        '<div class="vf-hero-text"><h1 class="vf-display">Know before<br>you <em>go</em>.</h1>'
         '<p class="vf-lead">VéloFlow forecasts mechanical bikes, e-bikes and free docks at '
         f"every one of the {len(stations):,} Vélib' stations, "
         f"{series(horizons(stations))} minutes ahead, so the station you walk to still has "
@@ -179,7 +171,7 @@ def story_html(stations: list[dict[str, Any]]) -> str:
         f"<li>{icon('check', 20, ACCENT)}<span><b>Counts, with their range.</b> Mechanical "
         "bikes, e-bikes and free docks, each with the range it will likely fall in.</span></li>"
         f"<li>{icon('check', 20, ACCENT)}<span><b>Risk, made explicit.</b> The probability "
-        "that the station will be empty, or full.</span></li>"
+        "of no bike left, or no free dock.</span></li>"
         f"<li>{icon('check', 20, ACCENT)}<span><b>The whole network.</b> "
         f"{len(stations):,} stations across Paris and the Métropole, refreshed with the "
         "live feed.</span></li></ul></div>"
@@ -258,7 +250,7 @@ def footer_html(document: dict[str, Any], links: dict[str, str]) -> str:
     )
     project = "".join(
         f'<li><a href="?page={links[label]}">{escape(text)}</a></li>'
-        for label, text in (("About", "How it works"), ("Admin", "Service health"))
+        for label, text in (("About", "About"), ("Admin", "Admin"))
         if label in links
     )
     return (

@@ -146,11 +146,6 @@ def read_recent(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> Rec
     )
 
 
-def recent_status(data_dir: Path, now: datetime, minutes: int = WINDOW_MIN) -> pl.DataFrame:
-    """Cleaned ``station_status`` versions of the last ``minutes`` (rules R1, R3)."""
-    return read_recent(data_dir, now, minutes).status
-
-
 def latest_weather(data_dir: Path, now: datetime) -> tuple[pl.DataFrame, datetime] | None:
     """15-minute rows of the most recent weather snapshot of today or yesterday, and its time."""
     archive = RawArchive(data_dir)
@@ -166,12 +161,6 @@ def latest_weather(data_dir: Path, now: datetime) -> tuple[pl.DataFrame, datetim
                 continue
             return rows, datetime.fromisoformat(record["fetched_at"])
     return None
-
-
-def latest_forecast(data_dir: Path, now: datetime) -> pl.DataFrame | None:
-    """15-minute rows of the most recent weather snapshot of today or yesterday."""
-    found = latest_weather(data_dir, now)
-    return found[0] if found else None
 
 
 def live_examples(status: pl.DataFrame, horizons: tuple[int, ...] = HORIZONS_MIN) -> pl.DataFrame:

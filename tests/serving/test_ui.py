@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
+from veloflow.serving.queries import chance, options_near
 from veloflow.serving.ui import (
+    CENTRE,
     DASH,
     GREEN,
     NEUTRAL,
@@ -16,7 +18,6 @@ from veloflow.serving.ui import (
     age_text,
     band_labels,
     brand_html,
-    chance,
     colour,
     count_cards_html,
     directions_url,
@@ -149,9 +150,9 @@ def test_smart_tip_points_at_the_worst_district() -> None:
     ]
 
     assert smart_tip(risky, "bike", "15") == (
-        "2 stations are likely to run out of bikes in Paris 11e within 15 minutes."
+        "2 stations are likely to have no bike left in Paris 11e within 15 minutes."
     )
-    assert "1 station is likely to fill up" in smart_tip(
+    assert "1 station is likely to have no free dock" in smart_tip(
         [station(4, 48.85, 0.0, p_full=0.9, code="4001")], "dock", "15"
     )
     assert smart_tip(STATIONS[1:], "dock", "60") == (
@@ -164,8 +165,8 @@ def test_smart_tip_points_at_the_worst_district() -> None:
     [
         (0.7, 0.0, "High risk of no bike", "poor"),
         (0.0, 0.6, "High risk of no free dock", "poor"),
-        (0.3, 0.1, "Some risk of the station being empty", "fair"),
-        (0.1, 0.25, "Some risk of the station being full", "fair"),
+        (0.3, 0.1, "Some risk of no bike left", "fair"),
+        (0.1, 0.25, "Some risk of no free dock", "fair"),
         (0.05, 0.05, "Low risk", "good"),
     ],
 )
@@ -203,9 +204,8 @@ def test_cards_render_the_figures() -> None:
     assert "Risk of no bike left" in risks
     assert "Risk of no free dock" in risks
     tiles = now_tiles_html(STATIONS[0])
-    assert "+1 in 15 min" in tiles  # mechanical 2 now, 3 forecast
-    assert "+0 in 15 min" in tiles  # e-bikes 1 and 1
-    assert "-1 in 15 min" in tiles  # docks 5 now, 4 forecast
+    assert tiles.count(">now<") == 3  # what it holds now; the forecast card says the rest
+    assert "in 15 min" not in tiles
     assert now_compact_html(STATIONS[0]).count('vf-mini"') == 3
     assert "Paris 4e · 120 m" in station_head_html(STATIONS[0], " · 120 m")
     assert "<h1 " in station_head_html(STATIONS[0], xl=True)
@@ -236,18 +236,20 @@ def test_page_parts() -> None:
     assert "1,486" in stats_html(cells)
     assert 'vf-stat-note up"' in cells[0]
     assert "Bikes" in tip_html("Bikes", "text", "good")
-    assert "12" in network_figures_html({"mechanical": 12, "ebike": 3, "docks": 7})
+    figures = network_figures_html({"mechanical": 12, "ebike": 3, "docks": 7, "with_bike": 0.5})
+    assert "12" in figures
+    assert "50%" in figures  # stations with a bike, now in this card
     assert legend_html(("a", "b", "c")).count("<i ") == 3
     assert "You" in legend_html(("a", "b", "c"), (("#000000", "You"),))
     assert [risk_tone(p) for p in (0.6, 0.3, 0.1)] == ["poor", "fair", ""]
 
 
 def test_tables_and_lists() -> None:
-    table = risk_table_html([(0.9, STATIONS[0])], "15", "empty")
+    table = risk_table_html([(0.9, STATIONS[0])], "empty")
     assert "Top 1 at-risk stations" in table
     assert "vf-risk-list" in table  # the style sheet sizes it to the map and scrolls it
     assert "Paris 4e" in table
-    assert "No station is likely to be full" in risk_table_html([], "30", "full")
+    assert "No station is likely to have no free dock." in risk_table_html([], "full")
     options = options_html(
         [{"station": STATIONS[1], "distance_m": 160.0, "probability": 0.95}], "dock"
     )
@@ -264,7 +266,7 @@ def test_names_from_the_feed_are_escaped() -> None:
 
     for html in (
         station_head_html(hostile),
-        risk_table_html([(0.9, hostile)], "15", "empty"),
+        risk_table_html([(0.9, hostile)], "empty"),
         options_html([{"station": hostile, "distance_m": 10.0, "probability": 0.1}], "bike"),
     ):
         assert "<script>" not in html
@@ -297,4 +299,13 @@ def test_about_reads_the_model_card() -> None:
     card = {**old["model"], "data_start": "2026-11-05T00:00:00", "examples": 1000}
     full = about_html({"stations": STATIONS, "model": {**card, "interval_level": 0.8}})
     assert "trained on 1,000 examples from 05 Nov 2026 00:00 UTC" in full
-    assert "80% prediction interval" in full
+    assert "prediction interval at 80%" in full
+
+
+def test_one_chance_for_the_card_and_the_list() -> None:
+    station = {**STATIONS[0], "lat": CENTRE[0], "lon": CENTRE[1]}
+    station["forecasts"] = {"15": {**STATIONS[0]["forecasts"]["15"], "p_empty": 0.0345}}
+    (option,) = options_near([station], *CENTRE, "bike", "15", 100)
+    # 0.9655: a rounded copy (0.965) used to show 96% in the list, 97% in the card.
+    assert option["probability"] == chance(station, "bike", "15")
+    assert percent(option["probability"]) == "97%"

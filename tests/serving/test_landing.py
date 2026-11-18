@@ -62,10 +62,9 @@ def test_network_map_draws_every_station() -> None:
 
 
 def test_hero_reads_the_document() -> None:
-    text = hero_text_html(DOCUMENT, "ok")
+    text = hero_text_html(DOCUMENT)
     assert "every one of the 2 Vélib' stations, 10 and 40 minutes ahead" in text
-    assert "updated 09:00" in text  # Paris time
-    assert "Delayed data" in hero_text_html(DOCUMENT, "stale")
+    assert "updated" not in text  # freshness is the header's pill, not repeated here
     visual = hero_visual_html(network_map_uri(STATIONS, "bike", "40"), STATIONS, "40")
     assert "average chance of a bike in 40 min" in visual
     assert "62%" in visual  # (0.95 + 0.3) / 2
@@ -98,5 +97,5 @@ def test_features_steps_demo_and_footer() -> None:
     assert "&lt;2&gt;" in demo  # names from the feed are escaped
     footer = footer_html(DOCUMENT, {"Home": "home", "Map": "map", "Admin": "admin"})
     assert 'href="?page=map"' in footer
-    assert "Service health" in footer
+    assert 'href="?page=admin">Admin</a>' in footer  # the name of the menu
     assert "trained on data up to 2026-11-11 23:59 UTC" in footer

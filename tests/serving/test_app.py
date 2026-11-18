@@ -259,13 +259,13 @@ def test_figures_follow_the_document(tmp_path: Path, monkeypatch: pytest.MonkeyP
     nav(page).set_value("Go now").run()
     assert "chance of a bike in 10 min" in html_of(page)
     nav(page).set_value("At risk").run()
-    assert "The 3 stations most likely to be empty in 10 minutes." in html_of(page)
+    assert "The stations most likely to have no bike left in 10 minutes." in html_of(page)
     nav(page).set_value("About").run()
     about = html_of(page)
     assert "each of the 3 Vélib" in about
     assert "10 and 20 minutes ahead" in about
     assert "123,456 examples from 05 Nov 2026 00:00 UTC to 11 Nov 2026 23:59 UTC" in about
-    assert "90% prediction interval" in about
+    assert "prediction interval at 90%" in about
 
 
 def test_missing_forecasts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

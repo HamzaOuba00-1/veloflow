@@ -50,6 +50,7 @@ from veloflow.serving.queries import (
     NEED_EVENT,
     Need,
     best_option,
+    chance,
     critical,
     freshness,
     options_near,
@@ -64,19 +65,22 @@ from veloflow.serving.ui import (
     ACCENT,
     CENTRE,
     COUNT_COLOURS,
+    FAIR,
     FAVICON,
     GITHUB,
     GOOD,
+    LABELS,
     RED,
+    RISK_TEXT,
     WALK_M_PER_MIN,
     about_html,
     band_labels,
     brand_html,
-    chance,
     count_cards_html,
     directions_url,
     empty_html,
     hex_colour,
+    horizon_label,
     horizons,
     insight,
     legend_html,
@@ -466,7 +470,7 @@ def render() -> None:
     summary = network_summary(stations)
     steps = horizons(stations)  # forecast horizons of this document, shortest first
     pages: dict[str, Callable[[], None]] = {
-        "Home": lambda: _home(st, document, stations, by_name, names, steps, status, go),
+        "Home": lambda: _home(st, document, stations, by_name, names, steps, go),
         "Map": lambda: _map(st, stations, by_name, by_id, steps, summary, go),
         "Go now": lambda: _go_now(st, stations, by_name, names, steps),
         "At risk": lambda: _at_risk(st, stations, steps),
@@ -499,18 +503,19 @@ def _home(
     by_name: dict[str, dict[str, Any]],
     names: list[str],
     steps: list[str],
-    status: str,
     go: Callable[[str], Callable[[], None]],
 ) -> None:
     """The landing page: hero, why, features, how it works, call to action."""
-    far = steps[-1]
+    first = steps[0]  # the hero, like every page, opens on the first horizon
     text, visual = st.columns([1, 1.08], gap="large", vertical_alignment="center")
     with text:
-        st.html(hero_text_html(document, status))
+        st.html(hero_text_html(document))
         with st.container(horizontal=True, key="hero-ctas"):
             st.button("Open the map", type="primary", on_click=go("Map"), key="hero-map")
             st.button("Find a bike now", on_click=go("Go now"), key="hero-go")
-    visual.html(hero_visual_html(_network_image(document["origin"], far, stations), stations, far))
+    visual.html(
+        hero_visual_html(_network_image(document["origin"], first, stations), stations, first)
+    )
 
     st.html(story_html(stations))
 
@@ -576,24 +581,25 @@ def _map(
     horizon = state.get("map_card_h", steps[0])
     if horizon not in steps:
         horizon = steps[0]
-    thing = "bike" if need == "bike" else "dock"
     chances = [chance(s, need, horizon) for s in stations if horizon in s["forecasts"]]
     average = sum(chances) / len(chances) if chances else 0.0
+    unlikely = sum(1 for c in chances if c < FAIR)
+    # What comes next; what the network holds now is in "Across the network now".
     st.html(
         stats_html(
             [
                 stat_html("bike", ACCENT, f"{summary['stations']:,.0f}", "Stations forecast"),
                 stat_html(
-                    "pie",
-                    COUNT_COLOURS["ebike"],
-                    percent(summary["with_bike"]),
-                    "Stations with a bike now",
-                ),
-                stat_html(
                     "clock",
                     COUNT_COLOURS["docks"],
                     percent(average),
-                    f"Average chance of a {thing} in {horizon} min",
+                    f"Average chance of a {need} in {horizon} min",
+                ),
+                stat_html(
+                    "alert",
+                    theme.ERROR,
+                    f"{unlikely:,}",
+                    f"Under {percent(FAIR)} chance of a {need} in {horizon} min",
                 ),
             ]
         )
@@ -625,11 +631,7 @@ def _map(
             # map, so both end on the same line (cards stretch to their row).
             st.html(station_head_html(selected, " · tap another station on the map"))
             st.radio(
-                "Forecast",
-                steps,
-                horizontal=True,
-                key="map_card_h",
-                format_func=lambda h: f"In {h} min",
+                "Forecast", steps, horizontal=True, key="map_card_h", format_func=horizon_label
             )
             st.html(count_cards_html(selected, horizon) + risk_cards_html(selected, horizon))
             st.button(
@@ -667,8 +669,8 @@ def _go_now(
     state = st.session_state
     st.html(
         page_head_html(
-            "Go now",
-            "The best Vélib' station near you, for the moment you get there.",
+            "The best station near you",
+            "Ranked by the chance of a bike, or a free dock, when you get there.",
             eyebrow="Go now",
         )
     )
@@ -701,7 +703,6 @@ def _go_now(
     go_h = min(steps, key=lambda h: abs(int(h) - walk))
     options = options_near(stations, here["lat"], here["lon"], need, go_h, walk * WALK_M_PER_MIN)
     best = best_option(options, GOOD) or (options[0] if options else None)
-    thing = "bike" if need == "bike" else "dock"
 
     card, map_column = st.columns([1, 1.45], gap="medium")
     with card, st.container(key="card-best"):
@@ -714,7 +715,7 @@ def _go_now(
                 '<div class="vf-demo-label">Best bet</div>'
                 + station_head_html(station, f" · {best['distance_m']:.0f} m · ~{minutes} min walk")
                 + f'<div class="vf-demo-chance"><b>{percent(chance(station, need, go_h))}</b>'
-                f"<span>chance of a {thing} in {go_h} min</span></div>"
+                f"<span>chance of a {need} in {go_h} min</span></div>"
                 + now_compact_html(station)
                 # One horizon, set by the walking time: no 15 / 30 / 60 table here.
                 + risk_cards_html(station, go_h)
@@ -741,7 +742,7 @@ def _go_now(
     with st.container(key="card-options"):
         st.html(
             f'<div class="vf-card-title">Stations within a {walk}-minute walk'
-            f"<small>chance of a {thing} in {go_h} min · nearest first</small></div>"
+            f"<small>chance of a {need} in {go_h} min · nearest first</small></div>"
             + options_html(options, need, grid=True)
         )
 
@@ -752,30 +753,32 @@ def _at_risk(st: Any, stations: list[dict[str, Any]], steps: list[str]) -> None:
     with st.container(horizontal=True, key="toolbar-risk"):
         need = NEEDS[st.radio("Looking for", list(NEEDS), horizontal=True, key="risk_need")]
         horizon = st.radio(
-            "In", steps, horizontal=True, key="risk_h", format_func=lambda h: f"{h} min"
+            "Forecast", steps, horizontal=True, key="risk_h", format_func=horizon_label
         )
     event_name = NEED_EVENT[need]
+    what = RISK_TEXT[event_name]
     ranked = critical(stations, event_name, horizon, limit=TOP_AT_RISK)
     head.html(
         page_head_html(
-            "At risk",
-            f"The {len(ranked)} stations most likely to be {event_name} in {horizon} minutes.",
+            "Stations about to run short",
+            f"The stations most likely to have {what} in {horizon} minutes.",
             eyebrow="At risk",
         )
     )
     average = sum(p for p, _ in ranked) / len(ranked) if ranked else 0.0
-    likely = sum(1 for p, _ in ranked if p >= 0.5)
+    likely = sum(1 for p, _ in ranked if p >= FAIR)
+    highest = ranked[0][0] if ranked else 0.0
     st.html(
         stats_html(
             [
-                stat_html("alert", theme.ERROR, f"{likely}", f"More likely {event_name} than not"),
-                stat_html("pie", ACCENT, percent(average), f"Average P({event_name}), top list"),
-                stat_html("clock", COUNT_COLOURS["docks"], f"{horizon} min", "Forecast horizon"),
+                stat_html("alert", theme.ERROR, f"{likely}", f"Over {percent(FAIR)} risk"),
+                stat_html("pie", ACCENT, percent(average), "Average risk in the list"),
+                stat_html("chart", COUNT_COLOURS["docks"], percent(highest), "Highest risk"),
             ]
         )
     )
     table, map_column = st.columns([1, 1.2], gap="medium")
-    table.html(risk_table_html(ranked, horizon, event_name))
+    table.html(risk_table_html(ranked, event_name))
     risky = {s["station_id"] for _, s in ranked}
     points = map_points(stations, need, horizon)
     for point in points:
@@ -786,7 +789,7 @@ def _at_risk(st: Any, stations: list[dict[str, Any]], steps: list[str]) -> None:
         st.pydeck_chart(_deck(others, centre=PARIS_VIEW, zoom=11.6, emphasis=at_risk), height=640)
         st.html(
             f'<div class="vf-legend"><span><i style="background:{hex_colour(RED)}"></i>'
-            f'Top {len(ranked)} at risk</span><span><i style="background:'
+            f'In the list</span><span><i style="background:'
             f'{hex_colour(theme.MAP_MUTED)}"></i>Other stations</span></div>'
         )
 
@@ -831,7 +834,7 @@ def _station(
             horizons([station]),
             horizontal=True,
             key="station_h",
-            format_func=lambda h: f"In {h} min",
+            format_func=horizon_label,
         )
         st.html(count_cards_html(station, horizon) + risk_cards_html(station, horizon))
     trend, reading = st.columns([1.6, 1], gap="medium")
@@ -841,7 +844,7 @@ def _station(
             ["mechanical", "ebike", "docks"],
             horizontal=True,
             key="trend",
-            format_func={"mechanical": "Mechanical", "ebike": "E-bikes", "docks": "Docks"}.get,
+            format_func=LABELS.get,
         )
         st.altair_chart(
             _trend_chart(station_trend(station, kind), share=False, colour=COUNT_COLOURS[kind]),
@@ -876,7 +879,7 @@ def _about(st: Any, document: dict[str, Any]) -> None:
     """How the forecasts are made, every figure read from the document."""
     st.html(
         page_head_html(
-            "About VéloFlow",
+            "How VéloFlow works",
             "How the forecasts are made, and what they are worth.",
             eyebrow="About",
         )

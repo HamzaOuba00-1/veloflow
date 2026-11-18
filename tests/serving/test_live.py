@@ -18,10 +18,10 @@ from veloflow.models.train import train
 from veloflow.serving import live
 from veloflow.serving.live import (
     _fetched_at,
-    latest_forecast,
+    latest_weather,
     live_examples,
     main,
-    recent_status,
+    read_recent,
 )
 from veloflow.serving.monitor import Monitor
 from veloflow.weather.snapshot import FEED as WEATHER_FEED
@@ -71,36 +71,36 @@ def test_fetch_time_is_read_without_decoding() -> None:
     assert _fetched_at('{"fetched_at": "yesterday"}') is None
 
 
-def test_recent_status_keeps_the_usable_versions_of_the_window(
+def test_read_recent_keeps_the_usable_versions_of_the_window(
     tmp_path: Path, make_response: Callable[..., RawResponse]
 ) -> None:
     archive_status(tmp_path, make_response)
 
-    status = recent_status(tmp_path, NOW)
+    status = read_recent(tmp_path, NOW).status
 
     times = sorted(status["fetched_at"].unique().to_list())
     assert times == [NOW - timedelta(minutes=m) for m in (30, 6, 1)]
     assert "operational" in status.columns
-    assert recent_status(tmp_path / "empty", NOW).height == 0
+    assert read_recent(tmp_path / "empty", NOW).status.height == 0
 
 
-def test_recent_status_reads_yesterday_after_midnight(
+def test_read_recent_reads_yesterday_after_midnight(
     tmp_path: Path, make_response: Callable[..., RawResponse]
 ) -> None:
     archive = RawArchive(tmp_path)
     late = make_response(fetched_at=datetime(2026, 11, 11, 23, 50, tzinfo=UTC))
     archive.append(STATUS_FEED, late, fingerprint="late")
 
-    status = recent_status(tmp_path, datetime(2026, 11, 12, 0, 20, tzinfo=UTC))
+    status = read_recent(tmp_path, datetime(2026, 11, 12, 0, 20, tzinfo=UTC)).status
 
     assert status["fetched_at"].unique().to_list() == [late.fetched_at]
 
 
-def test_latest_forecast_takes_the_newest_parsable_snapshot(
+def test_latest_weather_takes_the_newest_parsable_snapshot(
     tmp_path: Path, body: Callable[..., bytes]
 ) -> None:
     archive = RawArchive(tmp_path)
-    assert latest_forecast(tmp_path, NOW) is None
+    assert latest_weather(tmp_path, NOW) is None
     archive.append(
         WEATHER_FEED,
         RawResponse(content=body(9), fetched_at=NOW - timedelta(hours=1)),
@@ -118,9 +118,11 @@ def test_latest_forecast_takes_the_newest_parsable_snapshot(
         fingerprint="w3",
     )
 
-    weather = latest_forecast(tmp_path, NOW)
+    found = latest_weather(tmp_path, NOW)
 
-    assert weather is not None
+    assert found is not None
+    weather, fetched_at = found
+    assert fetched_at == NOW - timedelta(hours=1)  # the newer snapshots do not parse
     assert weather["point"].n_unique() == 9
     assert "temperature_2m" in weather.columns
 
@@ -130,12 +132,12 @@ def test_live_examples_at_the_latest_grid_time(
 ) -> None:
     archive_status(tmp_path, make_response)
 
-    examples = live_examples(recent_status(tmp_path, NOW))
+    examples = live_examples(read_recent(tmp_path, NOW).status)
 
     # Last version 08:02:30; the grid time is 08:00, holding the 07:57:30 state.
     assert examples["origin"].unique().to_list() == [datetime(2026, 11, 12, 8, tzinfo=UTC)]
     assert sorted(examples["horizon_min"].unique().to_list()) == [15, 30, 60]
-    assert live_examples(recent_status(tmp_path / "empty", NOW)).height == 0
+    assert live_examples(read_recent(tmp_path / "empty", NOW).status).height == 0
 
 
 @pytest.fixture

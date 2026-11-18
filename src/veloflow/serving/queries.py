@@ -17,6 +17,14 @@ Need = Literal["bike", "dock"]
 NEED_EVENT: dict[str, Event] = {"bike": "empty", "dock": "full"}
 
 
+def chance(station: dict[str, Any], need: Need, horizon: str) -> float:
+    """Chance to find a bike (``1 - P(empty)``) or a dock (``1 - P(full)``).
+
+    The one place this is computed: every page, list and endpoint uses it.
+    """
+    return 1.0 - float(station["forecasts"][horizon][f"p_{NEED_EVENT[need]}"])
+
+
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in metres (haversine)."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -59,12 +67,11 @@ def options_near(
     The chance is ``1 - P(empty)`` to find a bike and ``1 - P(full)`` to find
     a dock, at the horizon (the time it takes to get there).
     """
-    event = NEED_EVENT[need]
-    options = [
+    options: list[dict[str, Any]] = [
         {
             "station": s,
             "distance_m": round(distance_m(lat, lon, s["lat"], s["lon"]), 1),
-            "probability": round(1.0 - s["forecasts"][horizon][f"p_{event}"], 3),
+            "probability": chance(s, need, horizon),
         }
         for s in stations
         if horizon in s["forecasts"]

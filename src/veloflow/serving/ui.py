@@ -16,7 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from veloflow.serving import theme
-from veloflow.serving.queries import NEED_EVENT, Need, distance_m
+from veloflow.serving.queries import NEED_EVENT, Need, chance, distance_m
 
 PARIS = ZoneInfo("Europe/Paris")
 CENTRE = (48.8584, 2.3470)  # Châtelet
@@ -32,12 +32,15 @@ TONES = {"good": theme.SUCCESS, "fair": theme.WARNING, "poor": theme.ERROR}
 NEUTRAL = theme.BORDER_STRONG
 ACCENT = theme.PRIMARY
 COUNT_COLOURS = theme.COUNT_COLOURS
+# The three counts: key, label (the same on every page) and icon.
 COUNTS = (
-    ("mechanical", "Mechanical bikes", "bike"),
+    ("mechanical", "Mechanical", "bike"),
     ("ebike", "E-bikes", "zap"),
     ("docks", "Free docks", "dock"),
 )
-SHORT_LABELS = {"mechanical": "Mechanical", "ebike": "E-bikes", "docks": "Docks"}
+LABELS = {key: label for key, label, _ in COUNTS}
+# What a rider cannot do when an event happens: the words of every page.
+RISK_TEXT = {"empty": "no bike left", "full": "no free dock"}
 FAVICON = theme.STATIC / "images" / "favicon.png"
 
 _PATHS = {
@@ -161,11 +164,6 @@ def district(code: str | None) -> str:
     return "Métropole"
 
 
-def chance(station: dict[str, Any], need: Need, horizon: str) -> float:
-    """Chance to find a bike (``1 - P(empty)``) or a dock (``1 - P(full)``)."""
-    return 1.0 - float(station["forecasts"][horizon][f"p_{NEED_EVENT[need]}"])
-
-
 def network_summary(stations: list[dict[str, Any]]) -> dict[str, float]:
     """Bikes, e-bikes and docks available now, and the share of stations with a bike."""
     total = len(stations)
@@ -211,27 +209,30 @@ def smart_tip(stations: list[dict[str, Any]], need: Need, horizon: str) -> str:
         thing = "bikes" if need == "bike" else "free docks"
         return f"No district is short of {thing} in the next {horizon} minutes."
     worst, count = max(by_district.items(), key=lambda item: (item[1], item[0]))
-    what = "run out of bikes" if need == "bike" else "fill up"
     plural = "station is" if count == 1 else "stations are"
-    return f"{count} {plural} likely to {what} in {worst} within {horizon} minutes."
+    return (
+        f"{count} {plural} likely to have {RISK_TEXT[event]} in {worst} within {horizon} minutes."
+    )
 
 
 def insight(station: dict[str, Any], horizon: str) -> tuple[str, str]:
     """A one-line reading of a station's risks, and its tone."""
     forecast = station["forecasts"][horizon]
     empty, full = forecast["p_empty"], forecast["p_full"]
-    if empty >= FAIR:
-        return f"High risk of no bike in {horizon} minutes ({percent(empty)}).", "poor"
-    if full >= FAIR:
-        return f"High risk of no free dock in {horizon} minutes ({percent(full)}).", "poor"
-    if max(empty, full) >= WATCH:
-        what = "empty" if empty >= full else "full"
-        return (
-            f"Some risk of the station being {what} in {horizon} minutes "
-            f"({percent(max(empty, full))}).",
-            "fair",
-        )
-    return f"Low risk of being empty or full in the next {horizon} minutes.", "good"
+    event, p = ("empty", empty) if empty >= full else ("full", full)
+    if p >= FAIR:
+        return f"High risk of {RISK_TEXT[event]} in {horizon} minutes ({percent(p)}).", "poor"
+    if p >= WATCH:
+        return f"Some risk of {RISK_TEXT[event]} in {horizon} minutes ({percent(p)}).", "fair"
+    return (
+        f"Low risk of {RISK_TEXT['empty']} or {RISK_TEXT['full']} in the next {horizon} minutes.",
+        "good",
+    )
+
+
+def horizon_label(horizon: str) -> str:
+    """How every horizon choice of the app reads: "In 15 min"."""
+    return f"In {horizon} min"
 
 
 def nearest_index(
@@ -354,12 +355,12 @@ def count_cards_html(station: dict[str, Any], horizon: str) -> str:
     """Forecast of the three counts at a horizon, each with its 80 % interval."""
     forecast = station["forecasts"][horizon]
     cards = []
-    for key, _, icon_name in COUNTS:
+    for key, label, icon_name in COUNTS:
         low, high = forecast[f"{key}_interval"]
         capacity = max(1.0, float(station.get("capacity") or 0) or high or 1.0)
         cards.append(
             f'<div class="vf-count"><div class="vf-count-label">'
-            f"{icon(icon_name, 16, COUNT_COLOURS[key])}{SHORT_LABELS[key]}</div>"
+            f"{icon(icon_name, 16, COUNT_COLOURS[key])}{label}</div>"
             f'<div class="vf-count-value">{forecast[key]:.0f}</div>'
             f'<div class="vf-count-note">likely {low:.0f}{DASH}{high:.0f}</div>'
             f"{_bar(forecast[key] / capacity, COUNT_COLOURS[key])}</div>"
@@ -377,8 +378,8 @@ def risk_cards_html(station: dict[str, Any], horizon: str) -> str:
         for label, p in (
             # Say what the rider cannot do, not the operator's word ("empty", "full").
             # The horizon is already shown next to the cards, by a choice or a heading.
-            ("Risk of no bike left", forecast["p_empty"]),
-            ("Risk of no free dock", forecast["p_full"]),
+            (f"Risk of {RISK_TEXT['empty']}", forecast["p_empty"]),
+            (f"Risk of {RISK_TEXT['full']}", forecast["p_full"]),
         )
     )
     return f'<div class="vf-risks">{cards}</div>'
@@ -397,20 +398,13 @@ def station_head_html(station: dict[str, Any], extra: str = "", *, xl: bool = Fa
 
 
 def now_tiles_html(station: dict[str, Any]) -> str:
-    """What the station holds now, with the change expected at the shortest horizon."""
-    first = station_horizons(station)[0] if station["forecasts"] else None
-    cells = []
-    for key, label, icon_name in COUNTS:
-        now = station["now"][key]
-        later = station["forecasts"][first].get(key) if first else None
-        note, trend = "", ""
-        if later is not None:
-            change = round(later - now)
-            arrow = "↑" if change > 0 else "↓" if change < 0 else "→"
-            note = f"{arrow} {change:+d} in {first} min"
-            trend = "up" if change > 0 else "down" if change < 0 else ""
-        cells.append(stat_html(icon_name, COUNT_COLOURS[key], f"{now:.0f}", label, note, trend))
-    return stats_html(cells)
+    """What the station holds now (the forecast card beside it gives what comes next)."""
+    return stats_html(
+        [
+            stat_html(icon_name, COUNT_COLOURS[key], f"{station['now'][key]:.0f}", label, "now")
+            for key, label, icon_name in COUNTS
+        ]
+    )
 
 
 def now_compact_html(station: dict[str, Any]) -> str:
@@ -418,8 +412,8 @@ def now_compact_html(station: dict[str, Any]) -> str:
     tiles = "".join(
         f'<div class="vf-mini">{icon(icon_name, 18, COUNT_COLOURS[key])}'
         f'<div class="vf-mini-value">{station["now"][key]:.0f}</div>'
-        f'<div class="vf-mini-label">{SHORT_LABELS[key]}</div></div>'
-        for key, _, icon_name in COUNTS
+        f'<div class="vf-mini-label">{label}</div></div>'
+        for key, label, icon_name in COUNTS
     )
     return f'<div class="vf-minis">{tiles}</div>'
 
@@ -437,11 +431,10 @@ def tip_html(title: str, text: str, tone_name: str = "info") -> str:
 
 def network_figures_html(summary: dict[str, float]) -> str:
     """Bikes, e-bikes and docks available across the network now."""
-    items = (
-        ("bike", COUNT_COLOURS["mechanical"], f"{summary['mechanical']:,.0f}", "Mechanical bikes"),
-        ("zap", COUNT_COLOURS["ebike"], f"{summary['ebike']:,.0f}", "E-bikes"),
-        ("dock", COUNT_COLOURS["docks"], f"{summary['docks']:,.0f}", "Free docks"),
-    )
+    items = [
+        (name, COUNT_COLOURS[key], f"{summary[key]:,.0f}", label) for key, label, name in COUNTS
+    ]
+    items.append(("pie", ACCENT, percent(summary["with_bike"]), "Stations with a bike"))
     return (
         '<div class="vf-card-title">Across the network now</div><div class="vf-figures">'
         + "".join(
@@ -461,10 +454,10 @@ def empty_html(title: str, text: str) -> str:
     )
 
 
-def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], horizon: str, event: str) -> str:
-    """The at-risk stations, most likely first."""
+def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], event: str) -> str:
+    """The at-risk stations, most likely first (the page heading gives the horizon)."""
     if not ranked:
-        empty = empty_html("All clear", f"No station is likely to be {event} right now.")
+        empty = empty_html("All clear", f"No station is likely to have {RISK_TEXT[event]}.")
         return f'<div class="vf-card">{empty}</div>'
     rows = "".join(
         f'<tr><td class="vf-num">{i}</td><td>{escape(s["name"])}</td>'
@@ -474,11 +467,10 @@ def risk_table_html(ranked: list[tuple[float, dict[str, Any]]], horizon: str, ev
     )
     return (
         f'<div class="vf-card vf-risk-list"><div class="vf-card-title">'
-        f"Top {len(ranked)} at-risk stations"
-        f'<small>{event.capitalize()} in {horizon} min</small></div><div class="vf-table-wrap">'
-        '<table class="vf-table vf-rank"><thead><tr><th scope="col">#</th>'
-        '<th scope="col">Station</th><th scope="col">District</th>'
-        '<th scope="col" class="r">Chance</th></tr></thead>'
+        f"Top {len(ranked)} at-risk stations</div>"
+        '<div class="vf-table-wrap"><table class="vf-table vf-rank"><thead><tr>'
+        '<th scope="col">#</th><th scope="col">Station</th><th scope="col">District</th>'
+        '<th scope="col" class="r">Risk</th></tr></thead>'
         f"<tbody>{rows}</tbody></table></div></div>"
     )
 
@@ -555,7 +547,7 @@ def about_html(document: dict[str, Any]) -> str:
         span = f"from {_when(card['data_start'])} to {_when(card['data_end'])}"
     examples = f" on {card['examples']:,} examples" if card.get("examples") else ""
     interval = (
-        f" Each count comes with a {card['interval_level']:.0%} prediction interval "
+        f" Each count comes with a prediction interval at {card['interval_level']:.0%} "
         "(split conformal), shown as its likely range."
         if card.get("interval_level")
         else ""
@@ -564,13 +556,14 @@ def about_html(document: dict[str, Any]) -> str:
         '<div class="vf-card"><div class="vf-prose"><p>VéloFlow forecasts, for each of the '
         f"{len(stations):,} Vélib' Métropole stations of this update, the number of mechanical "
         f"bikes, e-bikes and free docks {series(horizons(stations))} minutes ahead, and the "
-        "probability that the station will be empty or full.</p>"
+        f"probability of {RISK_TEXT['empty']} or {RISK_TEXT['full']} at each station.</p>"
         "<h3>Data</h3><p>The public Vélib' feed, cleaned by explicit quality rules (stale "
         "versions, closed stations, frozen feed); Open-Meteo weather forecasts; the French "
         f"school calendar. The model in use was trained{examples} {span}.</p>"
         f"<h3>Model</h3><p>The model <code>{escape(str(card['name']))}</code> is one global "
         "model per horizon, trained on every station at once. It forecasts the change from "
-        f"now, and calibrated probabilities of empty and full.{interval} Every model is "
+        f"now, and calibrated probabilities of {RISK_TEXT['empty']} and of "
+        f"{RISK_TEXT['full']}.{interval} Every model is "
         "evaluated by the same backtest, which fails if a forecast reads data from after "
         "its own time.</p>"
         "<h3>Accuracy</h3><p>Measured by that backtest against simple baselines, and re-run "

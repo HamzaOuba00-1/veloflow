@@ -172,13 +172,22 @@ its URL.
 
 | Page | Requirement | Content |
 |---|---|---|
-| Home | | landing page: the promise, a live map of the whole network coloured by the chance of a bike at the longest horizon, why (share of stations with a bike now against the average chance at the longest horizon), the four views, how Go now works with a live example (the station nearest Châtelet), a call to action; every figure from the document |
-| Map | F1 | key figures, every station coloured by the chance to find a bike or a dock (green from 80 %, orange from 50 %, red below), the selected station's forecast beside the map (tap a station to select it), the network overview (share of stations with a bike now and expected at 15, 30, 60 minutes; bikes, e-bikes and docks available) and a tip naming the district where the risk concentrates |
-| Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state and forecasts, and walking directions |
-| At risk | F3 | the 20 stations most likely to be empty (or full), with their district, and the same stations on the map |
-| Station | F4 | state now with the change expected in 15 minutes, a map centred on the station, counts with their 80 % interval and risks of empty and full at 15, 30 or 60 minutes, the trend of each count, and a one-line reading of the risks |
+| Home | | landing page: the promise, a live map of the whole network coloured by the chance of a bike at the first horizon, why (share of stations with a bike now against the average chance at the longest horizon), the four views, how Go now works with a live example (the station nearest Châtelet), a call to action; every figure from the document |
+| Map | F1 | key figures at the chosen horizon, every station coloured by the chance to find a bike or a dock (green from 80 %, orange from 50 %, red below), the selected station's forecast beside the map with the page's only horizon choice (15 min first; tap a station to select it), the network overview (share of stations with a bike now and expected at 15, 30, 60 minutes; bikes, e-bikes and docks available) and a tip naming the district where the risk concentrates |
+| Go now | F2 | from a station, for a bike or a dock, within 5, 10 or 15 minutes' walk: every station in reach with its chance, the map with the walk to the best one, its state now and its risks at the horizon nearest to the walking time, and walking directions |
+| At risk | F3 | the 20 stations most likely to have no bike left (or no free dock), with their district and risk, in a list as tall as the map beside it that scrolls on wide screens, and the same stations on the map |
+| Station | F4 | state now, a map centred on the station, counts with their 80 % interval and risks of no bike left and no free dock at 15, 30 or 60 minutes (one at a time), the trend of each count, and a one-line reading of the risks |
 | Admin | F6 | alerts, collector health (last fetch, usable fetches of the last hour, stations in service), weather snapshot, real accuracy per horizon and count against persistence with interval coverage, Brier score of the empty and full probabilities, models in service |
 | About | | what the forecasts are, the data and the model, every figure read from the document (stations, horizons, training window and examples, interval level); accuracy is left to the evaluation report, so no measured figure goes stale in the app |
+
+### One vocabulary
+
+The pages say what a rider cannot do, never the operator's "empty" or
+"full": *no bike left*, *no free dock* (`ui.RISK_TEXT`). The three counts read
+the same everywhere: Mechanical, E-bikes, Free docks (`ui.COUNTS`). Every
+horizon choice reads "In 15 min" (`ui.horizon_label`), one per card. The
+chance of a bike or a dock is computed in one place (`queries.chance`), for
+the API and every page.
 
 ### No figure written by hand
 
@@ -258,10 +267,8 @@ violet tile. Two photos are optional: `landing-ride` (story section) and
 `landing-cta` (closing call to action); without them the page draws its own
 panels (`theme.image_url` returns `None`). The story's figures (stations with
 a bike now, average chance at the longest horizon) are always the live ones,
-written over the photo: the photo carries no figure. The two
-Eiffel Tower pictures of the previous design (`hero.jpg`, `sidebar.jpg`) and
-the drawings are no longer used; credits are in
-`src/veloflow/serving/static/images/CREDITS.md`.
+written over the photo: the photo carries no figure. Credits are
+in `src/veloflow/serving/static/images/CREDITS.md`.
 
 Some elements of the mockups were left out on purpose, because no data
 supports them: an "overall accuracy" figure (none is measured; the map page

@@ -10,9 +10,16 @@ from html import escape
 from typing import Any
 
 from veloflow.serving import theme
-from veloflow.serving.ui import DASH, TONES, label_cells, stat_html, stats_html, tip_html
-
-TARGET_LABELS = {"mechanical": "Mechanical bikes", "ebike": "E-bikes", "docks": "Free docks"}
+from veloflow.serving.ui import (
+    DASH,
+    LABELS,
+    RISK_TEXT,
+    TONES,
+    label_cells,
+    stat_html,
+    stats_html,
+    tip_html,
+)
 
 
 def _ago(stamp: str | None, now: datetime) -> str:
@@ -117,7 +124,7 @@ def accuracy_html(status: dict[str, Any]) -> str:
             )
             tint = TONES["good"] if gain is not None and gain > 0 else TONES["poor"]
             rows.append(
-                f"<tr><td>{horizon} min</td><td>{TARGET_LABELS.get(target, escape(target))}</td>"
+                f"<tr><td>{horizon} min</td><td>{LABELS.get(target, escape(target))}</td>"
                 f'<td class="r vf-fig">{_num(t["mae"])}</td>'
                 f'<td class="r vf-fig">{_num(t["mae_persistence"])}</td>'
                 f'<td class="r vf-fig" style="color:{tint if judged else "inherit"}">'
@@ -155,10 +162,10 @@ def events_html(status: dict[str, Any]) -> str:
         f'<td class="r vf-fig">{_num(f[event]["brier_persistence"], 3)}</td>'
         f'<td class="r vf-fig">{_pct(f[event]["rate"])}</td></tr>'
         for h, f in live["horizons"].items()
-        for event, label in (("empty", "No bike"), ("full", "No dock"))
+        for event, label in ((e, RISK_TEXT[e].capitalize()) for e in ("empty", "full"))
     )
     return _table_card(
-        "Empty and full stations",
+        f"{RISK_TEXT['empty'].capitalize()}, {RISK_TEXT['full']}",
         "",
         ["Horizon", "Event", "#Brier model", "#Brier persistence", "#Observed rate"],
         rows,
