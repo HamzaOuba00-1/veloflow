@@ -90,7 +90,7 @@ Cards and status: [model card](docs/cards/model_card.md) ·
 | Serving | FastAPI, Uvicorn, Streamlit, pydeck, Altair | REST API with OpenAPI docs; web app with maps and charts, desktop and phone layouts |
 | Cloud (Google Cloud) | Compute Engine (Shielded VM), Cloud Storage, Cloud Run services and jobs, Cloud Scheduler, Cloud Build, Artifact Registry, IAM, Identity-Aware Proxy | VM running 24/7, public forecast document, two services scaled to zero, weekly training job, image built from the sources, one service account per job, SSH without an open port |
 | MLOps | Model registry in Cloud Storage, champion/challenger | Weekly retraining, promotion only when no worse on the holdout, every decision recorded, one-command rollback |
-| Delivery | Docker, GitHub Actions, Dependabot, pip-audit, uv, systemd | One image for the API, the app and the training job, CI on every push, weekly dependency updates and vulnerability audit, locked dependencies, sandboxed services on the VM |
+| Delivery | Docker, GitHub Actions, pip-audit, uv, systemd | One image for the API, the app and the training job, CI on every push, weekly vulnerability audit, locked dependencies, sandboxed services on the VM |
 | Quality | pytest, mypy `--strict`, ruff, pre-commit | Tests and static checks run locally and in CI |
 | Operations | healthchecks.io, Cloud Billing budget, custom domain with managed TLS | Alerts when a job stops, cost guard at 1 USD a month, `veloflow.spaceh.online` |
 
@@ -175,8 +175,10 @@ uv run veloflow-predict --data-dir data           # forecast now -> data/serving
   - no key file exists; secrets stay in the VM's environment file.
 - Network and host: SSH only through Identity-Aware Proxy (port 22 closed to
   the internet), Secure Boot, automatic security updates on the VM.
-- Supply chain: GitHub Actions pinned by commit, Dependabot, weekly
-  `pip-audit` of the locked dependencies.
+- Supply chain: GitHub Actions pinned by commit, weekly `pip-audit` of the
+  locked dependencies, GitHub security alerts. Dependencies are updated by
+  hand (`uv lock --upgrade`), tested, then committed: no bot writes to the
+  repository.
 - Cost: built for the free tier (e2-micro VM, Cloud Storage and Cloud Run in
   us-east1, services scaled to zero), with a 1 USD budget alert. Billing
   checked at 0.00 USD on 10 November 2026, before Cloud Run; next check in
