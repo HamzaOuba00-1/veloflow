@@ -1,3 +1,5 @@
+<img src="docs/images/logo.png" alt="VéloFlow logo" width="96" align="right">
+
 # VéloFlow
 
 [![CI](https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml/badge.svg)](https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml)
