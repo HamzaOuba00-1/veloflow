@@ -201,7 +201,8 @@ def test_cards_render_the_figures() -> None:
     assert f"likely 2{DASH}4" in cards
     risks = risk_cards_html(STATIONS[0], "15")
     assert "60%" in risks
-    assert "Station full" in risks
+    assert "Risk of no bike left in 15 min" in risks
+    assert "Risk of no free dock in 15 min" in risks
     tiles = now_tiles_html(STATIONS[0])
     assert "+1 in 15 min" in tiles  # mechanical 2 now, 3 forecast
     assert "+0 in 15 min" in tiles  # e-bikes 1 and 1

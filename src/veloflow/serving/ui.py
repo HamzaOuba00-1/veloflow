@@ -368,15 +368,16 @@ def count_cards_html(station: dict[str, Any], horizon: str) -> str:
 
 
 def risk_cards_html(station: dict[str, Any], horizon: str) -> str:
-    """Probabilities that the station is empty, or full, at a horizon."""
+    """Probabilities that the station has no bike left, or no free dock, at a horizon."""
     forecast = station["forecasts"][horizon]
     cards = "".join(
         f'<div class="vf-risk"><div class="vf-risk-top"><span class="vf-risk-value" '
         f'style="color:{TONES.get(risk_tone(p), theme.TEXT)}">{percent(p)}</span></div>'
         f'<div class="vf-risk-label">{label}</div>{_bar(p, risk_colour(p))}</div>'
         for label, p in (
-            ("Station empty", forecast["p_empty"]),
-            ("Station full", forecast["p_full"]),
+            # Say what the rider cannot do, not the operator's word ("empty", "full").
+            (f"Risk of no bike left in {horizon} min", forecast["p_empty"]),
+            (f"Risk of no free dock in {horizon} min", forecast["p_full"]),
         )
     )
     return f'<div class="vf-risks">{cards}</div>'
