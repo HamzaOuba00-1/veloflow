@@ -1,32 +1,61 @@
-<img src="docs/images/logo.png" alt="VéloFlow logo" width="76" align="right">
+<p align="center">
+  <img src="docs/images/logo.png" alt="VéloFlow logo" width="64">
+</p>
 
-# VéloFlow
+<h1 align="center">VéloFlow</h1>
 
-[![CI](https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml/badge.svg)](https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml)
+<p align="center">
+  <b>Live availability forecasts for the ~1,500 stations of Vélib' Métropole, Paris</b><br>
+  Mechanical bikes, e-bikes and free docks, 15, 30 and 60 minutes ahead,<br>
+  with 80 % intervals and calibrated risks of a station running out.
+</p>
 
-Station-level forecasts for the Vélib' Métropole bike-sharing network in Paris:
-for each of the ~1,500 stations, how many mechanical bikes, e-bikes and free
-docks there will be in 15, 30 and 60 minutes, with 80 % intervals and
-calibrated probabilities that the station will be empty or full. Live, updated
-every 10 minutes, on free-tier infrastructure.
+<p align="center">
+  <a href="https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml"><img src="https://github.com/HamzaOuba00-1/veloflow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/HamzaOuba00-1/veloflow/actions/workflows/audit.yml"><img src="https://github.com/HamzaOuba00-1/veloflow/actions/workflows/audit.yml/badge.svg" alt="Audit"></a>
+  <img src="https://img.shields.io/badge/python-3.12-3776AB" alt="Python 3.12">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6247D4" alt="MIT licence"></a>
+</p>
 
-**Live:** [web app](https://veloflow.spaceh.online) ·
-[API docs](https://veloflow-api-235721892563.us-east1.run.app/docs) ·
-[service health](https://veloflow-api-235721892563.us-east1.run.app/status)
-(the services sleep when unused: the first visit takes a few seconds)
+<p align="center">
+  <a href="https://veloflow.spaceh.online"><b>Open the live app</b></a> ·
+  <a href="https://veloflow-api-235721892563.us-east1.run.app/docs">API docs</a> ·
+  <a href="https://veloflow.spaceh.online/?page=admin">Live accuracy</a> ·
+  <a href="docs/cards/model_card.md">Model card</a>
+</p>
 
 ![Home page: the whole network live, with the average chance of finding a bike](docs/images/home.webp)
+
+## At a glance
+
+- **End to end, in production**: a collector reads the Vélib' feed every
+  30 seconds since 8 November 2026; every 10 minutes a model forecasts all
+  1,496 stations and publishes them to a web app and a REST API.
+- **Better than "nothing changes" on unseen days**: on 12-17 November
+  (7.6 million forecasts the model never trained on), the risk of a station
+  running out of bikes or docks is predicted with a Brier score **27 % lower
+  than persistence** (0.0213 against 0.0292); counts are 1 % better.
+- **MLOps**: every Monday a Cloud Run job trains a challenger, scores it
+  against the model in service on the days that model never saw, and promotes
+  it only if it is no worse; every decision is recorded, rollback is one
+  command.
+- **Honest uncertainty**: conformal 80 % intervals, per group of stations
+  (Mondrian), 18 % narrower than a single `± k`; calibrated probabilities.
+- **Engineered like a product**: 414 tests (97 % coverage), `mypy --strict`,
+  infrastructure as code, least-privilege identities, SSH only through IAP,
+  Secure Boot; runs on the Google Cloud free tier.
 
 | Map | Go now? |
 |---|---|
 | ![Map of every station with the chance to find a bike](docs/images/map.webp) | ![Nearest stations with a bike when you arrive](docs/images/go-now.webp) |
 | **At risk** | **Station** |
-| ![Stations most likely to be empty or full within the hour](docs/images/at-risk.webp) | ![One station: forecasts at 15, 30 and 60 minutes with intervals](docs/images/station.webp) |
+| ![Stations most likely to run out within the hour](docs/images/at-risk.webp) | ![One station: forecasts at 15, 30 and 60 minutes with intervals](docs/images/station.webp) |
 | **Admin** | **On a phone** |
-| ![Collector health, model in service and live accuracy](docs/images/admin.webp) | <img src="docs/images/phone-go-now.webp" alt="Go now on a phone, with the bottom tab bar" width="260"> |
+| ![Collector health, model in service, live accuracy and training runs](docs/images/admin.webp) | <img src="docs/images/phone-go-now.webp" alt="Go now on a phone, with the bottom tab bar" width="260"> |
 
-Screenshots of the live app, taken by `scripts/assets/screenshots.py`; every
-figure on them comes from the forecast document of that moment.
+The services sleep when unused: the first visit takes a few seconds. Every
+figure in the app is computed from the live forecast document; none is
+written by hand.
 
 ## What it answers
 
@@ -98,10 +127,23 @@ Cards and status: [model card](docs/cards/model_card.md) ·
 
 ## Results
 
-Measured, with the amount of data in mind: the history started on 8 November
-2026, so these first backtests train on one or two days.
+All figures are measured; the history is still short (it starts on
+8 November 2026), so they will move as it grows.
 
-Backtest on 9-10 November 2026 (rolling origin, frozen stations left out):
+**Out of sample, in production conditions** (first run of the weekly
+training job, 18 November): the model in service, trained on data up to
+10 November, scored on 12-17 November with the backtest bench, frozen
+stations left out (7.6 million forecasts):
+
+| Model | MAE of the counts | Brier score, no bike left / no free dock |
+|---|---|---|
+| **Model in service** (LightGBM) | **0.861** | **0.0213** |
+| Persistence ("nothing changes") | 0.869 | 0.0292 |
+| Challenger (trained on one day) | 0.874 | 0.0228 |
+
+The challenger was rejected: the rule kept the better model in service.
+
+**Rolling-origin backtest** on 9-10 November (the first two complete days):
 
 | Horizon | MAE mechanical bikes, LightGBM / persistence | `empty` ranking (average precision), LightGBM / calibrated persistence | `empty` Brier / calibration error |
 |---|---|---|---|
@@ -154,8 +196,9 @@ uv run veloflow-predict --data-dir data           # forecast now -> data/serving
 
 - One installable package (`src/veloflow`); the collector, the API, the app
   and the scripts only import it.
-- 387 tests, 98.7 % coverage (lines and branches), `mypy --strict`, ruff,
-  12 pre-commit hooks; CI runs them on every push and builds the serving image.
+- 414 tests, 97 % coverage (lines and branches), `mypy --strict`, ruff,
+  12 pre-commit hooks; CI runs them on every push, builds the image and checks
+  that the training job can load its libraries.
 - Degraded cases tested: feed down, partial or malformed response, unknown or
   vanished station, broken or unreachable forecast document, failed monitoring.
 - Infrastructure as code (`infra/`): VM setup, systemd units with memory caps
@@ -204,8 +247,9 @@ docs/          data, models, evaluation, serving, deployment
 
 ## Limits and next steps
 
-- **Little history**: about a week of data, no summer, no school holidays
-  yet. Every result above will be rerun as the history grows.
+- **Little history**: ten days of data, no summer, no school holidays yet.
+  Every result above will be rerun as the history grows; the weekly job does
+  it on its own.
 - Counts do not beat persistence yet; intervals still over-cover a little
   (82-87 %), to re-check with more history.
 - Not done: "your station is emptying" alerts (F7), rebalancing simulation
@@ -226,3 +270,9 @@ Data sources and their terms:
 - French school calendar: Ministère de l'Éducation nationale,
   [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
 - Pictures and font of the app: see [CREDITS.md](src/veloflow/serving/static/images/CREDITS.md).
+
+## Author
+
+Built by **Hamza Ouba** ([GitHub](https://github.com/HamzaOuba00-1)) as an
+end-to-end data science project: data collection, quality, modelling,
+evaluation, serving, MLOps and cloud deployment.
